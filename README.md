@@ -31,7 +31,14 @@ protected function getHeaderActions(): array
 - [Installation](#installation)
 - [Usage](#usage)
 - [How rows are checked](#how-rows-are-checked)
+- [Images and files](#images-and-files)
+- [Approval](#approval)
+- [Scheduled imports](#scheduled-imports)
+- [Records that are not in the file](#records-that-are-not-in-the-file)
+- [Editing in a spreadsheet](#editing-in-a-spreadsheet)
+- [Updating existing records](#updating-existing-records)
 - [Clean-up and value mapping](#clean-up-and-value-mapping)
+- [AI suggestions](#ai-suggestions)
 - [Importing and undoing](#importing-and-undoing)
 - [Parent and child sheets](#parent-and-child-sheets)
 - [Templates](#templates)
@@ -67,10 +74,16 @@ There is no queue worker to set up: the browser sends the work in small steps an
 - **Review before writing**: every row is new, changed (with the old and new value of each field, related records by name), unchanged or an error. Rows that point at the same record are flagged. Filter by outcome and scroll through 100,000 rows.
 - **Fix in place**: double-click a cell (double-tap on a phone or tablet, or press Enter) to change the value from the file and the row is checked again. Skip single rows or every row with an error. Find and replace in a column.
 - **Clean-up** per column: trim, numbers like `$1,200` and `(300)`, dates like `Oct 20, 2026`, `2026/10/20` and Excel serials, yes/no like `Y` / `N` — and the Japanese forms too: full-width digits, `１，２００円`, `△300`, `令和8年10月20日`, はい／いいえ and ○／×, postal codes and phone numbers. Numbers, dates and yes/no values that Filament would silently turn into `0` or `true` become errors instead.
+- **AI suggestions** (optional): **Suggest with AI** maps headers like "Client ID" or "Mail" and values like "England" or "VIP" with Claude — you check them before anything is imported.
 - **Value mapping**: the different values of a column with their row counts, unknown values first, mapped to the column's options (enums, `in` rules), related records or yes/no, with suggestions. An invalid value in the review has a **Choose…** button that opens it.
 - **Undo** for 30 days: created records are deleted, changed ones get their old values back. Records someone changed after the import are kept and listed.
 - **Parent and child sheets**: orders and their items, in two sheets of one workbook, in one import.
 - **Templates**: save the mapping, clean-up and value mapping; files with the same headers get them automatically next time.
+- **Images and files**: photos and documents from links or a ZIP, put on a Laravel disk when the row is written, removed again on undo.
+- **Approval**: one person prepares the import, another reviews the same changes and approves or sends it back.
+- **Scheduled imports**: import a supplier's price list from a link, a Google Sheets spreadsheet or storage every hour, day or week, with the same columns and clean-up; rows with errors stop the run and notify you.
+- **Sync with a full list**: optionally delete or deactivate the records a file leaves out — listed in the review, confirmed before writing, undone with the rest.
+- **Edit in a spreadsheet**: download the current records with the importer's headers, change them in Excel and import the file back — only the changed rows are written.
 - **Results**: created, updated and failed rows. Rows that were not imported (skipped, errors, failed) can be fixed right there and imported into the same import, or downloaded as a CSV with the reasons.
 - **History** of imports to reopen, resume or undo them, and `->queue()` for imports you would rather run in the background.
 - Light and dark mode, keyboard navigation, English and Japanese, and Filament's [multi-tenancy](#multi-tenancy).
@@ -208,6 +221,14 @@ and register it in the resource's `getPages()`, for example `'import' => ImportP
 | `->maxRows(20_000)` | none | The most rows an import may have (all sheets together). Larger files are refused when they are read. |
 | `->templates(true, shared: true)` | on, shareable | Saving and applying templates. `shared: false` keeps every template private; `->templates(false)` turns them off. Both accept closures, for example to check a policy. |
 | `->child(OrderItemImporter::class, relationship: 'order', parentColumn: 'order_no', sheet: 'Items', label: null)` | — | Imports another sheet of the workbook as children. See [Parent and child sheets](#parent-and-child-sheets). |
+| `->files('image', disk: 'public', directory: 'products')` | — | An image or file column: a link or a file name from a ZIP, downloaded or extracted when the row is written. See [Images and files](#images-and-files). |
+| `->requireApproval(fn () => User::role('manager')->get(), when: fn (User $user) => ! $user->isManager())` | off | Someone else approves an import before it is written. See [Approval](#approval). |
+| `->schedules(disks: ['supplier'])` | off | Lets users run an import again on a schedule, from a link or a file on a disk. See [Scheduled imports](#scheduled-imports). |
+| `->aiSuggestions()` | off | **Suggest with AI** in the column step and the value mapping, with Claude. See [AI suggestions](#ai-suggestions). |
+| `->missingRecords(delete: true)` / `->missingRecords(update: ['is_active' => false])` | off | Lets users treat a file as the complete list: records that are not in it are deleted or changed. See [Records that are not in the file](#records-that-are-not-in-the-file). |
+| `->currentData(false)` | on | Hides **Download current data** on the first screen. See [Editing in a spreadsheet](#editing-in-a-spreadsheet). |
+| `->keepBlankCells()` | off | For existing records, an empty cell leaves the current value instead of clearing it. Users can change it in the column step. See [Updating existing records](#updating-existing-records). |
+| `->updateColumns(['price', 'stock'])` | all columns | The columns that may change on existing records; the others are only used for new records. Users can change it in the column step. |
 
 ## How rows are checked
 
@@ -225,6 +246,167 @@ When the user presses **Check**, the rows are sent to the server in chunks of up
 All of this happens inside a database transaction that is rolled back, so nothing your importer writes while checking — for example with `firstOrCreate()` in `resolveRecord()` — stays in the database. Hooks that act outside the database (sending mail, calling an API) do run, so keep those in `afterSave()`, which is not called while checking.
 
 Numbers, dates and yes/no values are checked before your rules run. Filament reads `abc` in a numeric column as `0` and `いいえ` in a boolean column as `true`; Warp reports them as errors instead. The type of a column comes from the column itself (`numeric()`, `boolean()`, `enum()`, `relationship()`), the model's casts and the rules.
+
+## Images and files
+
+Product photos, logos, PDFs: a column of your importer can take a link or a file name, and Warp puts the file on a disk and gives your importer its path.
+
+```php
+// The importer: an ordinary column that stores a path
+ImportColumn::make('image')->rules(['nullable', 'string', 'max:255']),
+
+// The action
+WarpImportAction::make()
+    ->importer(ProductImporter::class)
+    ->files('image', disk: 'public', directory: 'products'),
+```
+
+In the file, write either a link (`https://cdn.example.com/mug.png`) or a file name (`mug.png`). For file names, users add the files in one ZIP on the first screen of the wizard (**Images and files → Add a ZIP…**); names are matched without case and without the folders inside the ZIP.
+
+- **Review**: the link's form and extension, and whether a name is in the ZIP, are checked; the table shows the link or name. Your importer sees the path the file will get (`products/3f2a9c….png`). The path comes from the link, or from the name and contents in the ZIP, so importing the same picture again is **Unchanged** and nothing is downloaded twice.
+- **Import**: the file is downloaded or extracted and put on the disk before the row is written. A file that is too large, of the wrong type, not a file (an HTML error page) or that cannot be downloaded makes that row fail with the reason; other rows go on.
+- **Undo** removes the files the import put on the disk.
+- **Security**: only `http` and `https` links. Links to internal network addresses — `127.0.0.1`, `10.x`, `192.168.x`, `169.254.x` and other private or reserved ranges — are refused, including where a redirect leads, so an import cannot make your server call machines inside your network. Pass `privateNetwork: true` to allow them.
+
+| Argument | Default | |
+| --- | --- | --- |
+| `disk` | `'public'` | The Laravel disk to put the files on. |
+| `directory` | `''` | The directory on the disk. |
+| `maxKilobytes` | `5120` | The largest file. |
+| `types` | `['jpg', 'jpeg', 'png', 'gif', 'webp']` | The extensions accepted (from the link's path or the name in the ZIP). |
+| `privateNetwork` | `false` | Allow links to internal network addresses. |
+
+The ZIP is uploaded with Livewire's temporary uploads, so its size is limited by `livewire.temporary_file_upload.rules` (12 MB by default) and your server's upload limits; raise them for large photo sets. The ZIP is kept with the import and deleted with it. Files go on the parent sheet's columns, not on [child sheets](#parent-and-child-sheets). The PHP `zip` extension is needed for ZIPs.
+
+## Approval
+
+For data where a wrong import is expensive — prices, stock, accounts — let one person prepare the import and another approve it:
+
+```php
+WarpImportAction::make()
+    ->importer(ProductImporter::class)
+    ->requireApproval(
+        approvers: fn () => User::query()->where('role', 'manager')->get(),
+        when: fn (User $user): bool => $user->role !== 'manager',   // managers import directly
+    ),
+```
+
+- The person importing goes through the wizard as usual. Instead of **Import**, the button says **Request approval for 42 rows**; they can add a note. The import waits — nothing is written — and the review becomes read only. **Withdraw request** takes it back.
+- The approvers get a Filament database notification with a **Review** button that opens the import in the [history](#import-history) (the panel needs `->databaseNotifications()` and the user model Laravel's `Notifiable`). Imports waiting for them are also listed in their history.
+- An approver sees the same review — every new row, every change with its old and new value, the records [not in the file](#records-that-are-not-in-the-file) — and presses **Approve and import**, which writes the rows from their browser (or the queue), or **Send back…** with a reason. Approvers cannot change rows.
+- The person who asked is notified either way. A sent-back import shows the reason; they fix it and request approval again. Rows [fixed after the import](#importing-and-undoing) need approval too.
+- The person importing never approves their own import, even if they are in the list. Both can open the result and undo it.
+
+Events: `ImportApprovalRequested`, `ImportApproved` and `ImportRejected`, each with the `ImportRun` as `$run`, for mail or Slack. The approvers are fixed when the request is sent.
+
+## Scheduled imports
+
+A supplier updates a price list every night, a stock count lands on an SFTP server every hour, the sales team keeps a Google Sheets spreadsheet: import the file once by hand, then let Warp import it again on a schedule.
+
+```php
+WarpImportAction::make()
+    ->importer(ProductImporter::class)
+    ->schedules(disks: ['supplier']),   // links, and files on the "supplier" disk
+```
+
+1. Import the file as usual: map the columns, set up the clean-up and value mapping, import.
+2. On the result, press **Run on a schedule…**. Give it a name, say where the file is — **At a link** or **In storage** (a disk you listed; the files on it are offered) — how often (every hour, day or week, at a time in the user's time zone) and what to do with rows that have errors.
+3. **Scheduled imports** in the navigation lists the user's schedules with the last run and the next one. **Run now** runs one at once; the menu has **Last import**, **Edit** (name, file, time, pause) and **Delete**.
+
+Each run:
+
+- **Fetches the file**: CSV, TSV, text or `.xlsx` (the first sheet), UTF-8, UTF-16 or Shift_JIS, up to 100 MB. A Google Sheets share link (`https://docs.google.com/spreadsheets/d/…/edit#gid=0`) is turned into its CSV export; the spreadsheet must be shared with anyone who has the link.
+- **Maps the columns by their header names**, so a file with the columns in another order, or with extra columns, still works. If a mapped header is gone, the run fails and names it.
+- **Checks every row** exactly like the review, with the clean-up, value mapping, [update settings](#updating-existing-records), importer options and [records not in the file](#records-that-are-not-in-the-file) of the first import, as the user who created the schedule, in the same panel and tenant.
+- **Rows with errors**: by default the run stops before writing anything and notifies the user; **Last import** (or the notification's **Review**) opens it in the review to fix the rows and import by hand. Choose **Skip those rows and import the rest** to write the good rows anyway; the list says how many were skipped.
+- **Writes the rows** on the queue, like `->queue()`: the user gets the usual notification and the run is in the [history](#import-history), where it can be undone. If the import needs [approval](#approval), the run asks for it instead.
+- A file with nothing new or changed is recorded as **Nothing new**, without a notification.
+
+The list shows the outcome of the last run: **Imported** (with the counts), **Importing**, **Waiting for approval**, **Stopped**, **Nothing new** or **Failed** (the file could not be fetched or read, a column is missing, or the user can no longer import there). **Stopped** and **Failed** also send a database notification, so the panel needs `->databaseNotifications()`.
+
+**What you need on the server**: Warp adds `warp-import:run-schedules` to Laravel's scheduler (every minute), so the usual cron entry `* * * * * php artisan schedule:run` must be there, and a queue worker for the runs. Nothing runs while the schedule is paused.
+
+| Argument | Default | |
+| --- | --- | --- |
+| `$condition` | `true` | A bool or closure: who may create schedules (`fn () => auth()->user()->isAdmin()`). |
+| `disks` | `[]` | The Laravel disks users may pick files from, for example an `sftp` or `s3` disk your supplier uploads to. The `.csv`, `.tsv`, `.txt` and `.xlsx` files on them are offered in the form. Empty: links only. |
+| `urls` | `true` | Allow links. `false` allows files on the `disks` only. |
+| `privateNetwork` | `false` | Allow links to internal network addresses. |
+
+- **Security**: links are checked like [image links](#images-and-files) — `http` and `https` only, and internal network addresses (`127.0.0.1`, `10.x`, `192.168.x`, `169.254.x` and other private or reserved ranges) are refused when the schedule is saved and again on each run, including where a redirect leads. Only the disks you list can be read, and the form lists their files to everyone who may create schedules, so list a disk that holds import files only.
+- Each user sees and changes only their own schedules (in the current tenant). A schedule runs with its creator's permissions; if they can no longer import there, the run fails.
+- [Parent and child sheets](#parent-and-child-sheets) cannot be scheduled yet.
+- `->maxRows()` applies to each run.
+
+## Records that are not in the file
+
+Some files are the complete list: this week's price list, the products a supplier still sells, the staff who work here. Turn on `missingRecords()` and users can let such a file decide what happens to the records it leaves out:
+
+```php
+WarpImportAction::make()
+    ->importer(ProductImporter::class)
+    ->missingRecords(update: ['is_active' => false]),   // or ->missingRecords(delete: true)
+```
+
+The column step then has a checkbox — **Also change the products that are not in the file (Active: no)** or **Also delete the products that are not in the file** — which is off for every import until the user ticks it. With it ticked:
+
+- The review has a **Not in file** tab listing every record the file leaves out, with its current values. Untick a record to keep it. A record counts as in the file when any row points at it, including rows with errors and rows the user skipped, so a typo in a row does not delete its record.
+- The import button says what will happen (**Import 3 rows · delete 47**), and pressing it asks once more, with the number, before anything is written.
+- The file rows are written first, then the records that are not in the file are changed or deleted, each in its own savepoint. If the model has a policy, `update` or `delete` must allow each record; a record the database refuses to delete (a foreign key) is listed as failed with the reason.
+- The result counts them (**Marked** or **Deleted**) and **Undo** puts them back: changed records get their old values, soft-deleted records are restored, and other deleted records are inserted again with their original key and values. Records the database deleted along with them (cascades) are not restored, so prefer `update:` or soft deletes for records with children.
+
+The records considered are the same as for [Download current data](#editing-in-a-spreadsheet): all records of the importer's model in the current tenant, narrowed by `warpImportQuery()` on the importer if it has one. This only applies to the parent sheet, not to [child sheets](#parent-and-child-sheets).
+
+## Editing in a spreadsheet
+
+The first screen of the wizard has **Download current data (CSV)**. It downloads the records with one column per importer column, headed by the column labels — so when the file comes back, every column maps itself. Change prices in Excel or Google Sheets, import the file, and the review shows exactly the rows you changed as **Changed**; everything else is **Unchanged** and is not written. Undo works as for any import.
+
+What goes into the file:
+
+| Column | Written as |
+| --- | --- |
+| Related records (`->relationship()`) | the attribute you resolve them by (`Kitchen`, not `3`); many-to-many columns joined with their separator (`New,Sale`) |
+| Choices (enums, `in` rules) | the value (`on_sale`), which the import accepts as it is |
+| Yes / no | `yes` / `no` |
+| Dates | `2026-01-05`, with the time when there is one (`2026-01-05 09:30:00`) |
+
+Columns that do not fill a model attribute (only `fillRecordUsing()`) and the model's `$hidden` attributes, such as passwords, are left out. The file is built in the browser in steps of 500 records, with a progress count.
+
+The records are all records of the importer's model, in the current [tenant](#multi-tenancy). To narrow them, add a static method to the importer:
+
+```php
+use Illuminate\Database\Eloquent\Builder;
+
+class ProductImporter extends Importer
+{
+    public static function warpImportQuery(Builder $query): Builder
+    {
+        return $query->where('is_archived', false);
+    }
+}
+```
+
+The download is offered to users who may list the records: if the model has a policy, its `viewAny` must allow it. `->currentData(false)` turns it off. Child sheets are not included in the download.
+
+## Updating existing records
+
+A file that only carries prices should change prices, not wipe out names. Two settings in the column step decide what happens to records that already exist; new records always get every mapped column.
+
+- **Leave the current value when a cell is empty.** With this ticked, an empty cell does nothing to an existing record: the column is not validated and not filled for that row, so a `required` rule does not fail and the old value stays. Without it, Warp does what Filament does: the empty value is validated and written (unless the column uses Filament's `ignoreBlankState()`).
+- **Update existing** (a tick per column). Unticked columns are not validated or filled for existing records, in any row. A price list with the product name in it, for example, keeps every name as it is but still creates new products with their names.
+
+In the review, the cells that an existing record keeps are shown faded and hatched ("Not updated: the existing record keeps its value"), and they never count as changes. Numbers, dates and yes/no values in these cells are not checked either, so a broken value in a column you do not update does not stop the row. Undo only puts back what was written.
+
+Set the defaults on the action — users can still change them, and templates keep them:
+
+```php
+WarpImportAction::make()
+    ->importer(ProductImporter::class)
+    ->keepBlankCells()
+    ->updateColumns(['price', 'stock']),
+```
+
+Both settings apply to the parent sheet and to [child sheets](#parent-and-child-sheets) alike; "Update existing" is chosen per sheet.
 
 ## Clean-up and value mapping
 
@@ -256,6 +438,61 @@ A value that cannot be cleaned up stays as it is, so the row shows an error with
 In the review, an error on a choice column, a related record or a yes / no column ("The selected prefecture is invalid.") shows the value from the file and a **Choose…** button. It opens the value mapping of that column at the value of the row, so users see the values the column accepts instead of guessing.
 
 Only the rows with a changed value are checked again. **Find and replace** works the same way, on the value from the file, for part of the cell or the whole cell, in every row or only in rows with errors.
+
+## AI suggestions
+
+Files from other systems rarely use your names: "Client ID" for the customer code, "Mail" for the email, "Membership level" for the rank, and values like "England", "Deutschland" or "VIP". Turn on `aiSuggestions()` and users can ask Claude to map them:
+
+```php
+WarpImportAction::make()
+    ->importer(CustomerImporter::class)
+    ->aiSuggestions(),
+```
+
+```php
+// config/services.php
+'anthropic' => [
+    'key' => env('ANTHROPIC_API_KEY'),
+],
+```
+
+- **Columns**: **Suggest with AI** above the column table sends the fields that are not mapped yet (name, label, type, whether required, the first choices) and the headers that are not used yet with up to three values from each. The answers fill only fields that are still **Do not import**, and are marked **AI** until the user changes them.
+- **Values**: in the value mapping of a column (**Map values…** or **Choose…** next to an error), **Suggest with AI** sends the values the column does not accept as written (up to 150) and the values it accepts (up to 300; for a relationship, the first 300 records by name). The answers fill only values without a mapping, are marked **AI**, and are written only when the user presses **Apply**; the rows are then checked again as usual.
+- Nothing is imported on the AI's word: every suggestion goes through the same review as everything else. Answers that name a field, header or value that does not exist, or a header twice, are dropped.
+- If the key is missing or Claude does not answer, the user sees a short message and carries on by hand. Each user can ask 20 times a minute.
+
+| Argument | Default | |
+| --- | --- | --- |
+| `$condition` | `true` | A bool or closure: who sees the button. |
+| `model` | `'claude-haiku-4-5'` | The Claude model. Haiku is fast and costs a fraction of a cent per question; `claude-sonnet-5` thinks harder. |
+| `samples` | `true` | Send the first values of each column with the headers. `false` sends the headers only (value suggestions always send the values they are about). |
+| `using` | `null` | A class implementing `Qalainau\FilamentWarpImport\Ai\SuggestsMappings`, to use another service or your own rules instead of Claude. |
+
+**Privacy**: headers and sample values, and in the value mapping the values of one column, are sent to Anthropic (or to your `using` class) when the user presses the button — never on their own. Turn samples off, or leave the feature off, for data that must not leave your servers.
+
+```php
+use Qalainau\FilamentWarpImport\Ai\SuggestsMappings;
+
+class OpenAiSuggester implements SuggestsMappings
+{
+    public function columns(array $fields, array $headers): array
+    {
+        // $fields: [['name' => 'code', 'label' => 'Code', 'type' => 'text', 'required' => true], ...]
+        // $headers: [['index' => 0, 'header' => 'Client ID', 'samples' => ['C0003', 'C9101']], ...]
+        return ['code' => 0];   // field name => header index
+    }
+
+    public function values(array $field, array $values, array $options): array
+    {
+        // $values: ['England', 'VIP'], $options: [['value' => 'gb', 'label' => 'United Kingdom'], ...]
+        return ['England' => 'gb'];   // file value => accepted value
+    }
+}
+
+->aiSuggestions(using: OpenAiSuggester::class)
+```
+
+Throw a `RuntimeException` with a message for the user when the service fails.
 
 ## Importing and undoing
 
