@@ -86,7 +86,7 @@ There is no queue worker to set up: the browser sends the work in small steps an
 - **Edit in a spreadsheet**: download the current records with the importer's headers, change them in Excel and import the file back — only the changed rows are written.
 - **Results**: created, updated and failed rows. Rows that were not imported (skipped, errors, failed) can be fixed right there and imported into the same import, or downloaded as a CSV with the reasons.
 - **History** of imports to reopen, resume or undo them, and `->queue()` for imports you would rather run in the background.
-- Light and dark mode, keyboard navigation, English and Japanese, and Filament's [multi-tenancy](#multi-tenancy).
+- Light and dark mode, keyboard navigation, translations (English, Japanese, German, French, Spanish, Italian, Brazilian Portuguese, Korean and Chinese, simplified and traditional), and Filament's [multi-tenancy](#multi-tenancy).
 
 ## Requirements
 
@@ -147,7 +147,9 @@ class ListProducts extends ListRecords
 }
 ```
 
-The action opens the wizard in a full-screen modal: **File → Columns → Review → Import**. It is a normal Filament action, so `->visible()`, `->authorize()`, `->label()`, `->icon()` and the rest work as usual. Its label is "Import products" by default.
+The action opens the wizard in a large modal over the list: **File → Columns → Review → Import**. It is a normal Filament action, so `->visible()`, `->authorize()`, `->label()`, `->icon()` and the rest work as usual. Its label is "Import products" by default.
+
+The modal leaves a margin around it on a computer, so the list stays visible behind it, and grows up to 1920 px wide for files with many columns; on a phone it fills the screen. To fill the whole window everywhere, use `->modalWidth(Width::Screen)` (`Filament\Support\Enums\Width`).
 
 The importer is an ordinary Filament importer. If you do not have one yet, `php artisan make:filament-importer Product --generate` creates it. A short example:
 
@@ -737,7 +739,7 @@ To change the relationship name for the whole panel, use `->tenant(Team::class, 
 
 ## Translations
 
-The wizard is translated into English and Japanese. Publish the translations to change or add languages:
+The wizard is translated into English, Japanese, German, French, Spanish, Italian, Brazilian Portuguese (`pt_BR`), Korean, and Chinese, simplified (`zh_CN`) and traditional (`zh_TW`). It follows the panel's locale (`app()->getLocale()`). Publish the translations to change or add languages:
 
 ```bash
 php artisan vendor:publish --tag=filament-warp-import-translations
