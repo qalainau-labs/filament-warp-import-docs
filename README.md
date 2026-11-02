@@ -35,7 +35,6 @@ protected function getHeaderActions(): array
 - [Approval](#approval)
 - [Scheduled imports](#scheduled-imports)
 - [Records that are not in the file](#records-that-are-not-in-the-file)
-- [Editing in a spreadsheet](#editing-in-a-spreadsheet)
 - [Updating existing records](#updating-existing-records)
 - [Clean-up and value mapping](#clean-up-and-value-mapping)
 - [AI suggestions](#ai-suggestions)
@@ -73,7 +72,7 @@ There is no queue worker to set up: the browser sends the work in small steps an
 - **Column mapping** guessed from your column names, labels and `guess()`, ignoring case, width and separators, with the first values of each column next to it.
 - **Review before writing**: every row is new, changed (with the old and new value of each field, related records by name), unchanged or an error. Rows that point at the same record are flagged. Filter by outcome and scroll through 100,000 rows.
 - **Fix in place**: double-click a cell (double-tap on a phone or tablet, or press Enter) to change the value from the file and the row is checked again. Skip single rows or every row with an error. Find and replace in a column.
-- **Clean-up** per column: trim, numbers like `$1,200` and `(300)`, dates like `Oct 20, 2026`, `2026/10/20` and Excel serials, yes/no like `Y` / `N` — and the Japanese forms too: full-width digits, `１，２００円`, `△300`, `令和8年10月20日`, はい／いいえ and ○／×, postal codes and phone numbers. Numbers, dates and yes/no values that Filament would silently turn into `0` or `true` become errors instead.
+- **Clean-up** per column: trim, numbers like `$1,200` and `(300)`, dates like `Oct 20, 2026`, `2026/10/20` and Excel serials, yes/no like `Y` / `N` — European files with decimal commas (`1.234,56 €`), `31.12.2026`, `31/12/2026` and month names in German, French, Spanish, Italian and Portuguese — and the Japanese forms too: full-width digits, `１，２００円`, `△300`, `令和8年10月20日`, はい／いいえ and ○／×, postal codes and phone numbers. Numbers, dates and yes/no values that Filament would silently turn into `0` or `true` become errors instead.
 - **AI suggestions** (optional): **Suggest with AI** maps headers like "Client ID" or "Mail" and values like "England" or "VIP" with Claude — you check them before anything is imported.
 - **Value mapping**: the different values of a column with their row counts, unknown values first, mapped to the column's options (enums, `in` rules), related records or yes/no, with suggestions. An invalid value in the review has a **Choose…** button that opens it.
 - **Undo** for 30 days: created records are deleted, changed ones get their old values back. Records someone changed after the import are kept and listed.
@@ -83,9 +82,8 @@ There is no queue worker to set up: the browser sends the work in small steps an
 - **Approval**: one person prepares the import, another reviews the same changes and approves or sends it back.
 - **Scheduled imports**: import a supplier's price list from a link, a Google Sheets spreadsheet or storage every hour, day or week, with the same columns and clean-up; rows with errors stop the run and notify you.
 - **Sync with a full list**: optionally delete or deactivate the records a file leaves out — listed in the review, confirmed before writing, undone with the rest.
-- **Edit in a spreadsheet**: download the current records with the importer's headers, change them in Excel and import the file back — only the changed rows are written.
 - **Results**: created, updated and failed rows. Rows that were not imported (skipped, errors, failed) can be fixed right there and imported into the same import, or downloaded as a CSV with the reasons.
-- **History** of imports to reopen, resume or undo them, and `->queue()` for imports you would rather run in the background.
+- **History** of imports to reopen, resume, undo or download them as imported, and `->queue()` for imports you would rather run in the background.
 - Light and dark mode, keyboard navigation, translations (English, Japanese, German, French, Spanish, Italian, Brazilian Portuguese, Korean and Chinese, simplified and traditional), and Filament's [multi-tenancy](#multi-tenancy).
 
 ## Requirements
@@ -228,7 +226,6 @@ and register it in the resource's `getPages()`, for example `'import' => ImportP
 | `->schedules(disks: ['supplier'])` | off | Lets users run an import again on a schedule, from a link or a file on a disk. See [Scheduled imports](#scheduled-imports). |
 | `->aiSuggestions()` | off | **Suggest with AI** in the column step and the value mapping, with Claude. See [AI suggestions](#ai-suggestions). |
 | `->missingRecords(delete: true)` / `->missingRecords(update: ['is_active' => false])` | off | Lets users treat a file as the complete list: records that are not in it are deleted or changed. See [Records that are not in the file](#records-that-are-not-in-the-file). |
-| `->currentData(false)` | on | Hides **Download current data** on the first screen. See [Editing in a spreadsheet](#editing-in-a-spreadsheet). |
 | `->keepBlankCells()` | off | For existing records, an empty cell leaves the current value instead of clearing it. Users can change it in the column step. See [Updating existing records](#updating-existing-records). |
 | `->updateColumns(['price', 'stock'])` | all columns | The columns that may change on existing records; the others are only used for new records. Users can change it in the column step. |
 
@@ -357,24 +354,7 @@ The column step then has a checkbox — **Also change the products that are not 
 - The file rows are written first, then the records that are not in the file are changed or deleted, each in its own savepoint. If the model has a policy, `update` or `delete` must allow each record; a record the database refuses to delete (a foreign key) is listed as failed with the reason.
 - The result counts them (**Marked** or **Deleted**) and **Undo** puts them back: changed records get their old values, soft-deleted records are restored, and other deleted records are inserted again with their original key and values. Records the database deleted along with them (cascades) are not restored, so prefer `update:` or soft deletes for records with children.
 
-The records considered are the same as for [Download current data](#editing-in-a-spreadsheet): all records of the importer's model in the current tenant, narrowed by `warpImportQuery()` on the importer if it has one. This only applies to the parent sheet, not to [child sheets](#parent-and-child-sheets).
-
-## Editing in a spreadsheet
-
-The first screen of the wizard has **Download current data (CSV)**. It downloads the records with one column per importer column, headed by the column labels — so when the file comes back, every column maps itself. Change prices in Excel or Google Sheets, import the file, and the review shows exactly the rows you changed as **Changed**; everything else is **Unchanged** and is not written. Undo works as for any import.
-
-What goes into the file:
-
-| Column | Written as |
-| --- | --- |
-| Related records (`->relationship()`) | the attribute you resolve them by (`Kitchen`, not `3`); many-to-many columns joined with their separator (`New,Sale`) |
-| Choices (enums, `in` rules) | the value (`on_sale`), which the import accepts as it is |
-| Yes / no | `yes` / `no` |
-| Dates | `2026-01-05`, with the time when there is one (`2026-01-05 09:30:00`) |
-
-Columns that do not fill a model attribute (only `fillRecordUsing()`) and the model's `$hidden` attributes, such as passwords, are left out. The file is built in the browser in steps of 500 records, with a progress count.
-
-The records are all records of the importer's model, in the current [tenant](#multi-tenancy). To narrow them, add a static method to the importer:
+The records considered are all records of the importer's model, in the current [tenant](#multi-tenancy). This only applies to the parent sheet, not to [child sheets](#parent-and-child-sheets). To narrow them — so that a price list of active products does not touch the archived ones — add a static method to the importer:
 
 ```php
 use Illuminate\Database\Eloquent\Builder;
@@ -387,8 +367,6 @@ class ProductImporter extends Importer
     }
 }
 ```
-
-The download is offered to users who may list the records: if the model has a policy, its `viewAny` must allow it. `->currentData(false)` turns it off. Child sheets are not included in the download.
 
 ## Updating existing records
 
@@ -421,14 +399,31 @@ Each column has a clean-up applied to the value from the file before your import
 | Trim spaces (also full-width spaces) | `␣ABC␣` → `ABC` | every column |
 | Full-width letters and digits to half-width | `ＡＢＣ１２３` → `ABC123` | e-mail columns |
 | Half-width katakana to full-width | `ｶﾀｶﾅ` → `カタカナ` | — |
-| Numbers | `$1,200`, `€1,200`, `¥1,200` and `１，２００円` → `1200`, `(300)` and `△300` → `-300` | numeric columns |
-| Dates | `Oct 20, 2026`, `20 October 2026`, `20-Oct-2026`, `2026/10/20 9:05`, `20261020`, `46315` (Excel), `令和8年10月20日`, `R8.10.20`, `2026年10月20日` → `2026-10-20` | date columns |
-| Yes / no | yes／no, Y／N, true／false, on／off, 1／0, はい／いいえ, ○／×, 有効／無効 → `1` / `0` | boolean columns |
+| Numbers | `$1,200`, `€1,200`, `¥1,200` and `１，２００円` → `1200`, `(300)` and `△300` → `-300`, `1.234,56 €`, `1 234,56` and `1'234.56` → `1234.56`, `12,99` → `12.99` | numeric columns |
+| Decimal comma | `1,234` → `1.234` and `1.234` → `1234` (see below) | numeric columns, when the file uses decimal commas |
+| Dates | `Oct 20, 2026`, `20 October 2026`, `20-Oct-2026`, `20.10.2026`, `20. Oktober 2026`, `20 octobre 2026`, `20 de octubre de 2026`, `2026/10/20 9:05`, `20261020`, `46315` (Excel), `令和8年10月20日`, `R8.10.20`, `2026年10月20日`, `2026년 10월 20일` → `2026-10-20` | date columns |
+| Day first, month first | `05/06/2026` → `2026-06-05` (day first) or `2026-05-06` (month first); `20/10/2026` and `10/20/2026` are read either way (see below) | date columns, when the file has such dates |
+| Yes / no | yes／no, Y／N, true／false, on／off, 1／0, ja／nein, oui／non, sí／no, sim／não, 예／아니요, 是／否, はい／いいえ, ○／×, 有効／無効 → `1` / `0` | boolean columns |
 | Postal code | `〒1000001`, `100 0001` → `100-0001` | columns named `postal`, `zip` |
 | Phone number | `０３ー１２３４ー５６７８` → `03-1234-5678` | columns named `phone`, `tel`, `fax` |
 | Upper case, lower case | | e-mail columns: lower case |
 
 A value that cannot be cleaned up stays as it is, so the row shows an error with the original value.
+
+**European and American files.** Most numbers and dates say how they are written: `1.234,56` and `12,99` have a decimal comma, `1,234.56` a decimal point; `31.12.2026` and `20/10/2026` put the day first, `10/20/2026` the month. Those are read right in any file. Only `1,234`, `1.234` and dates like `05/06/2026` could be either, so the wizard looks at the whole column when a file is opened (and when a column is mapped to another header):
+
+- a number column with values like `12,99` or `1.234,56` gets **Decimal comma**, so its `1.234` is one thousand two hundred thirty-four;
+- a date column with values like `31/12/2026` gets **Day first**, one with `12/31/2026` gets **Month first**. If every date in the column could be either, it follows the language of the browser (month first in American English, day first elsewhere).
+
+The choice shows in the clean-up of the column, where users can change it, and is kept in [templates](#templates) and [scheduled imports](#scheduled-imports). Without either, `05/06/2026` is not read and the row shows an error rather than a wrong date.
+
+```text
+Artikelnummer;Bezeichnung;Preis;Aktiv;Erschienen
+A-100;Wasserkocher;1.234,50 €;ja;31.12.2026
+A-101;Tasse;12,99 €;nein;05.06.2026
+```
+
+Warp reads the semicolons, `1.234,50 €` → `1234.50`, `ja` → `1` and `31.12.2026` → `2026-12-31` without any setting. Map German headers to your columns with `->guess(['artikelnummer', 'preis'])` on the importer's columns, or let users map them once and save a [template](#templates).
 
 **Value mapping** (the ▾ menu on a column in the review) lists the different values of a column with the number of rows, unknown values first, and lets users choose what each becomes:
 
@@ -506,7 +501,7 @@ Each step runs in one transaction and each row in a savepoint: a row that fails 
 
 The result lists created, updated and failed rows. **Download failed rows** gives a CSV with the original headers and a column with the reasons, ready to fix and import again.
 
-**Fixing rows after the import.** The result also counts the rows that were **Not imported**: rows you skipped, rows with errors and rows that failed while writing (rows that were unchanged need nothing and are not counted). **Fix the rows that were not imported** opens them in the review table with the same tools as before the import — change cells, map values, find and replace, include skipped rows — and **Import N rows** writes them into the same import:
+**Fixing rows after the import.** The result also counts the rows that were **Not imported**: rows you skipped, rows with errors and rows that failed while writing (rows that were unchanged need nothing and are not counted). In the result table these rows say **Not imported** and why — for example *Not imported: it is the same record as row 2.* for a duplicate — instead of the review's labels. **Fix the rows that were not imported** opens them in the review table with the same tools as before the import — change cells, map values, find and replace, include skipped rows — and **Import N rows** writes them into the same import:
 
 - Failed rows are checked again first, so a row that failed because something was missing (a category someone has added since, a record that was locked) now shows whether it would pass.
 - Rows that were already imported are not shown and cannot be changed (edit those records in your resource as usual). Value mapping and find and replace only touch the rows that were not imported.
@@ -568,7 +563,15 @@ $panel->plugin(
 );
 ```
 
-Each import shows when it started, the file, the kind of records, its status, the created, updated and failed rows and until when it can be undone. **Open** shows its result, resumes it if it was paused, or undoes it. Users see only their own imports, and in a panel with [tenancy](#multi-tenancy) only those of the current tenant. Without the plugin, the wizard still lists the five most recent imports of its importer.
+Each import shows when it started, the file, the kind of records, its status, the created, updated and failed rows and until when it can be undone. **Open** shows its result, resumes it if it was paused, or undoes it. **Download** gives back what was imported, as a CSV with the file's headers and its rows in their order — see below. Users see only their own imports, and in a panel with [tenancy](#multi-tenancy) only those of the current tenant. Without the plugin, the wizard still lists the five most recent imports of its importer.
+
+The file itself is never uploaded (it is read in the browser), so **Download** builds the CSV from the rows the import kept:
+
+- The cells are the ones that were imported: a cell fixed in the review has its fixed value, and the clean-up and value mapping are not applied (they run again if you import the file). The values the file had before you fixed them are not kept.
+- Rows you left out, duplicates and rows with errors are in the file too; the records that were [not in the file](#records-that-are-not-in-the-file) are not.
+- A workbook with [child sheets](#parent-and-child-sheets) comes as a ZIP with one CSV per sheet, named after the sheet.
+- It is what this import wrote, not the records as they are now: a change made after the import, in Filament or by another app, is not in it. If you import the downloaded file again, the records changed since then show up in the review as **Changed**, back to the imported values, before anything is written.
+- It is UTF-8 with a byte order mark, so Excel opens it without garbled text. Once an import is pruned (below), its rows are gone and it cannot be downloaded.
 
 Imports left in the review for more than a day, and imports whose undo period has ended, are removed with Laravel's pruning (a paused import is kept until it is finished). The model is in a package, so name it in the schedule:
 
