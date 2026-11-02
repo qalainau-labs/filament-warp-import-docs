@@ -68,7 +68,7 @@ There is no queue worker to set up: the browser sends the work in small steps an
 ![Values in the file mapped to the options of the column](https://raw.githubusercontent.com/qalainau-labs/filament-warp-import-docs/main/art/values.png)
 
 - **Your Filament importers, unchanged**: columns, `rules()`, `relationship()`, `castStateUsing()`, `fillRecordUsing()`, `resolveRecord()`, the hooks (`beforeSave()` and so on), `getOptionsFormComponents()` and `getCompletedNotificationBody()` all work as with `ImportAction`.
-- **CSV, TSV, Excel and pasted cells**: `.csv`, `.tsv` and `.xlsx`, UTF-8 or Shift_JIS (what Japanese Excel saves), every sheet of a workbook, Excel dates as dates. Or paste a block of cells from Excel or Google Sheets. Files are read in the browser and never uploaded.
+- **CSV, TSV, Excel and pasted cells**: `.csv`, `.tsv` and `.xlsx`; UTF-8, or the encoding Excel saves CSV in for its language — Windows-1252 (Western Europe and the Americas), Shift_JIS, Korean CP949, Chinese GBK or Big5 — told apart from the file, with an **Encoding** menu in case letters look wrong; every sheet of a workbook, Excel dates as dates. Or paste a block of cells from Excel or Google Sheets. Files are read in the browser and never uploaded.
 - **Column mapping** guessed from your column names, labels and `guess()`, ignoring case, width and separators, with the first values of each column next to it.
 - **Review before writing**: every row is new, changed (with the old and new value of each field, related records by name), unchanged or an error. Rows that point at the same record are flagged. Filter by outcome and scroll through 100,000 rows.
 - **Fix in place**: double-click a cell (double-tap on a phone or tablet, or press Enter) to change the value from the file and the row is checked again. Skip single rows or every row with an error. Find and replace in a column.
@@ -225,7 +225,7 @@ and register it in the resource's `getPages()`, for example `'import' => ImportP
 | `->requireApproval(fn () => User::role('manager')->get(), when: fn (User $user) => ! $user->isManager())` | off | Someone else approves an import before it is written. See [Approval](#approval). |
 | `->schedules(disks: ['supplier'])` | off | Lets users run an import again on a schedule, from a link or a file on a disk. See [Scheduled imports](#scheduled-imports). |
 | `->aiSuggestions()` | off | **Suggest with AI** in the column step and the value mapping, with Claude. See [AI suggestions](#ai-suggestions). |
-| `->missingRecords(delete: true)` / `->missingRecords(update: ['is_active' => false])` | off | Lets users treat a file as the complete list: records that are not in it are deleted or changed. See [Records that are not in the file](#records-that-are-not-in-the-file). |
+| `->missingRecords(delete: true)` / `->missingRecords(update: ['is_active' => false], label: …)` | off | Lets users treat a file as the complete list: records that are not in it are deleted or changed. See [Records that are not in the file](#records-that-are-not-in-the-file). |
 | `->keepBlankCells()` | off | For existing records, an empty cell leaves the current value instead of clearing it. Users can change it in the column step. See [Updating existing records](#updating-existing-records). |
 | `->updateColumns(['price', 'stock'])` | all columns | The columns that may change on existing records; the others are only used for new records. Users can change it in the column step. |
 
@@ -260,12 +260,12 @@ WarpImportAction::make()
     ->files('image', disk: 'public', directory: 'products'),
 ```
 
-In the file, write either a link (`https://cdn.example.com/mug.png`) or a file name (`mug.png`). For file names, users add the files in one ZIP on the first screen of the wizard (**Images and files → Add a ZIP…**); names are matched without case and without the folders inside the ZIP.
+In the file, write either a link (`https://cdn.example.com/mug.png`) or a file name (`mug.png`). For file names, users add the files in one ZIP with **Add a ZIP of images…**, a small button under the file drop on the first screen. People who only use links never need it: when the column step finds file names in the column and no ZIP has been added, it says so ("Image has 12 file names. Add those files in one ZIP to import them.") with the same button; for links it says nothing. Names are matched without case and without the folders inside the ZIP.
 
 - **Review**: the link's form and extension, and whether a name is in the ZIP, are checked; the table shows the link or name. Your importer sees the path the file will get (`products/3f2a9c….png`). The path comes from the link, or from the name and contents in the ZIP, so importing the same picture again is **Unchanged** and nothing is downloaded twice.
-- **Import**: the file is downloaded or extracted and put on the disk before the row is written. A file that is too large, of the wrong type, not a file (an HTML error page) or that cannot be downloaded makes that row fail with the reason; other rows go on.
-- **Undo** removes the files the import put on the disk.
-- **Security**: only `http` and `https` links. Links to internal network addresses — `127.0.0.1`, `10.x`, `192.168.x`, `169.254.x` and other private or reserved ranges — are refused, including where a redirect leads, so an import cannot make your server call machines inside your network. Pass `privateNetwork: true` to allow them.
+- **Import**: the file is downloaded or extracted and put on the disk before the row is written. A file that is too large, of the wrong type, not a file (an HTML error page) or that cannot be downloaded makes that row fail with the reason; other rows go on. Content that runs scripts in a browser — HTML, SVG, XML, PHP — is refused even if you allow its extension, because the disk is often public.
+- **Undo** removes the files the import put on the disk, unless another record still uses the same file (the same link or ZIP entry is stored once).
+- **Security**: only `http` and `https` links. Links to internal network addresses — `127.0.0.1`, `10.x`, `192.168.x`, `169.254.x`, `100.64.x` (some clouds' metadata) and other private or reserved ranges, IPv6 included — are refused, including where a redirect leads, so an import cannot make your server call machines inside your network. Every address of the host is checked and the download connects to the address that was checked, so a DNS answer that changes in between cannot reach inside. Pass `privateNetwork: true` to allow internal addresses.
 
 | Argument | Default | |
 | --- | --- | --- |
@@ -296,6 +296,9 @@ WarpImportAction::make()
 - The person who asked is notified either way. A sent-back import shows the reason; they fix it and request approval again. Rows [fixed after the import](#importing-and-undoing) need approval too.
 - The person importing never approves their own import, even if they are in the list. Both can open the result and undo it.
 
+- If the person who asked withdraws, changes rows and asks again while an approver has the review open, that approver's **Approve** does nothing and shows the new request instead, so nobody approves rows they have not seen.
+- In a panel with [tenancy](#multi-tenancy), only approvers who belong to the tenant (`HasTenants::canAccessTenant()`) are asked, even if `approvers:` returns users of other tenants.
+
 Events: `ImportApprovalRequested`, `ImportApproved` and `ImportRejected`, each with the `ImportRun` as `$run`, for mail or Slack. The approvers are fixed when the request is sent.
 
 ## Scheduled imports
@@ -314,12 +317,13 @@ WarpImportAction::make()
 
 Each run:
 
-- **Fetches the file**: CSV, TSV, text or `.xlsx` (the first sheet), UTF-8, UTF-16 or Shift_JIS, up to 100 MB. A Google Sheets share link (`https://docs.google.com/spreadsheets/d/…/edit#gid=0`) is turned into its CSV export; the spreadsheet must be shared with anyone who has the link.
+- **Fetches the file**: CSV, TSV, text or `.xlsx` (the first sheet), UTF-8, UTF-16 or the encoding of the first import (Windows-1252, Shift_JIS, CP949, GBK or Big5), up to 100 MB. A Google Sheets share link (`https://docs.google.com/spreadsheets/d/…/edit#gid=0`) is turned into its CSV export; the spreadsheet must be shared with anyone who has the link.
 - **Maps the columns by their header names**, so a file with the columns in another order, or with extra columns, still works. If a mapped header is gone, the run fails and names it.
 - **Checks every row** exactly like the review, with the clean-up, value mapping, [update settings](#updating-existing-records), importer options and [records not in the file](#records-that-are-not-in-the-file) of the first import, as the user who created the schedule, in the same panel and tenant.
 - **Rows with errors**: by default the run stops before writing anything and notifies the user; **Last import** (or the notification's **Review**) opens it in the review to fix the rows and import by hand. Choose **Skip those rows and import the rest** to write the good rows anyway; the list says how many were skipped.
 - **Writes the rows** on the queue, like `->queue()`: the user gets the usual notification and the run is in the [history](#import-history), where it can be undone. If the import needs [approval](#approval), the run asks for it instead.
 - A file with nothing new or changed is recorded as **Nothing new**, without a notification.
+- **With [records not in the file](#records-that-are-not-in-the-file)**: if more than a quarter of the saved records it would match are missing from the file, the run stops before writing anything and notifies the user, in case the file is cut short or nearly empty (a broken export, or a supplier's mistake). They open it, check the **Not in imported data** tab and import by hand.
 
 The list shows the outcome of the last run: **Imported** (with the counts), **Importing**, **Waiting for approval**, **Stopped**, **Nothing new** or **Failed** (the file could not be fetched or read, a column is missing, or the user can no longer import there). **Stopped** and **Failed** also send a database notification, so the panel needs `->databaseNotifications()`.
 
@@ -332,8 +336,8 @@ The list shows the outcome of the last run: **Imported** (with the counts), **Im
 | `urls` | `true` | Allow links. `false` allows files on the `disks` only. |
 | `privateNetwork` | `false` | Allow links to internal network addresses. |
 
-- **Security**: links are checked like [image links](#images-and-files) — `http` and `https` only, and internal network addresses (`127.0.0.1`, `10.x`, `192.168.x`, `169.254.x` and other private or reserved ranges) are refused when the schedule is saved and again on each run, including where a redirect leads. Only the disks you list can be read, and the form lists their files to everyone who may create schedules, so list a disk that holds import files only.
-- Each user sees and changes only their own schedules (in the current tenant). A schedule runs with its creator's permissions; if they can no longer import there, the run fails.
+- **Security**: links are checked like [image links](#images-and-files) — `http` and `https` only, and internal network addresses are refused when the schedule is saved and again on each run, including where a redirect leads. Only the disks you list can be read, and only `.csv`, `.tsv`, `.txt` and `.xlsx` files on them (when the schedule is saved, edited and run). The form lists those files to everyone who may create schedules, so list a disk that holds import files only.
+- Each user sees and changes only their own schedules (in the current tenant). A schedule runs with its creator's permissions; if they can no longer import there — they left the tenant, or `canAccessPanel()` now says no — the run fails. Queued imports pause the same way.
 - [Parent and child sheets](#parent-and-child-sheets) cannot be scheduled yet.
 - `->maxRows()` applies to each run.
 
@@ -347,9 +351,18 @@ WarpImportAction::make()
     ->missingRecords(update: ['is_active' => false]),   // or ->missingRecords(delete: true)
 ```
 
-The column step then has a checkbox — **Also change the products that are not in the file (Active: no)** or **Also delete the products that are not in the file** — which is off for every import until the user ticks it. With it ticked:
+The column step then has a checkbox — **For existing products that are not in the imported data: set “Active” to “no”** or **Delete existing products that are not in the imported data** — which is off for every import until the user ticks it. A **What does this do?** link under it opens a plain-language explanation: when to tick it, what happens with and without it, a worked example (100 saved, 90 in the data, the other 10 change), and how to undo it.
 
-- The review has a **Not in file** tab listing every record the file leaves out, with its current values. Untick a record to keep it. A record counts as in the file when any row points at it, including rows with errors and rows the user skipped, so a typo in a row does not delete its record.
+The words “set “Active” to “no”” are built from the importer column's label and the value. Say what it means in your users' words with `label:`:
+
+```php
+->missingRecords(update: ['is_active' => false], label: __('mark them as not for sale'))
+// For existing products that are not in the imported data: mark them as not for sale
+```
+
+The same words appear in the confirmation before anything is written. With it ticked:
+
+- The review has a **Not in imported data** tab listing every record the file leaves out, with its current values. Untick a record to keep it. A record counts as in the file when any row points at it, including rows with errors and rows the user skipped, so a typo in a row does not delete its record.
 - The import button says what will happen (**Import 3 rows · delete 47**), and pressing it asks once more, with the number, before anything is written.
 - The file rows are written first, then the records that are not in the file are changed or deleted, each in its own savepoint. If the model has a policy, `update` or `delete` must allow each record; a record the database refuses to delete (a foreign key) is listed as failed with the reason.
 - The result counts them (**Marked** or **Deleted**) and **Undo** puts them back: changed records get their old values, soft-deleted records are restored, and other deleted records are inserted again with their original key and values. Records the database deleted along with them (cascades) are not restored, so prefer `update:` or soft deletes for records with children.
@@ -372,8 +385,8 @@ class ProductImporter extends Importer
 
 A file that only carries prices should change prices, not wipe out names. Two settings in the column step decide what happens to records that already exist; new records always get every mapped column.
 
-- **Leave the current value when a cell is empty.** With this ticked, an empty cell does nothing to an existing record: the column is not validated and not filled for that row, so a `required` rule does not fail and the old value stays. Without it, Warp does what Filament does: the empty value is validated and written (unless the column uses Filament's `ignoreBlankState()`).
-- **Update existing** (a tick per column). Unticked columns are not validated or filled for existing records, in any row. A price list with the product name in it, for example, keeps every name as it is but still creates new products with their names.
+- **Keep the saved value when a cell in the imported data is empty.** With this ticked, an empty cell does nothing to an existing record: the column is not validated and not filled for that row, so a `required` rule does not fail and the old value stays. Without it, Warp does what Filament does: the empty value is validated and written (unless the column uses Filament's `ignoreBlankState()`).
+- **Update saved data** (a tick per column). Unticked columns are not validated or filled for existing records, in any row. A price list with the product name in it, for example, keeps every name as it is but still creates new products with their names.
 
 In the review, the cells that an existing record keeps are shown faded and hatched ("Not updated: the existing record keeps its value"), and they never count as changes. Numbers, dates and yes/no values in these cells are not checked either, so a broken value in a column you do not update does not stop the row. Undo only puts back what was written.
 
@@ -386,7 +399,7 @@ WarpImportAction::make()
     ->updateColumns(['price', 'stock']),
 ```
 
-Both settings apply to the parent sheet and to [child sheets](#parent-and-child-sheets) alike; "Update existing" is chosen per sheet.
+Both settings apply to the parent sheet and to [child sheets](#parent-and-child-sheets) alike; "Update saved data" is chosen per sheet.
 
 ## Clean-up and value mapping
 
@@ -499,7 +512,7 @@ Throw a `RuntimeException` with a message for the user when the service fails.
 
 Each step runs in one transaction and each row in a savepoint: a row that fails — a database error, an exception in a hook, `RowImportFailedException`, or a model event that returns `false` from `saving` — is rolled back on its own and listed as failed, and the other rows are written. Rows that run into a busy database (`database is locked`, a deadlock) are tried again. A row is checked once more when it is written, so a record that changed since the review is validated against its current state.
 
-The result lists created, updated and failed rows. **Download failed rows** gives a CSV with the original headers and a column with the reasons, ready to fix and import again.
+The result lists created, updated and failed rows. **Download failed rows** gives a CSV with the original headers and a column with the reasons, ready to fix and import again. Cells that Excel would run as formulas get an apostrophe in front, which is removed when you import the file again (see [Import history](#import-history)).
 
 **Fixing rows after the import.** The result also counts the rows that were **Not imported**: rows you skipped, rows with errors and rows that failed while writing (rows that were unchanged need nothing and are not counted). In the result table these rows say **Not imported** and why — for example *Not imported: it is the same record as row 2.* for a duplicate — instead of the review's labels. **Fix the rows that were not imported** opens them in the review table with the same tools as before the import — change cells, map values, find and replace, include skipped rows — and **Import N rows** writes them into the same import:
 
@@ -563,7 +576,9 @@ $panel->plugin(
 );
 ```
 
-Each import shows when it started, the file, the kind of records, its status, the created, updated and failed rows and until when it can be undone. **Open** shows its result, resumes it if it was paused, or undoes it. **Download** gives back what was imported, as a CSV with the file's headers and its rows in their order — see below. Users see only their own imports, and in a panel with [tenancy](#multi-tenancy) only those of the current tenant. Without the plugin, the wizard still lists the five most recent imports of its importer.
+Each import shows when it started, the file, the kind of records, its status, the created, updated and failed rows and until when it can be undone. **Open** shows its result, resumes it if it was paused, or undoes it; it continues that import only — a new import is started from the import action, so the action's `visible()` and permissions still apply. **Download** gives back what was imported, as a CSV with the file's headers and its rows in their order — see below. Users see only their own imports, and in a panel with [tenancy](#multi-tenancy) only those of the current tenant. Without the plugin, the wizard still lists the five most recent imports of its importer.
+
+Dates and times — on this page and in the wizard (until when an import can be undone, when an approval was requested) — are shown in the panel's timezone: `FilamentTimezone::set()` if you set one, otherwise `app.timezone`. The wizard does not use the browser's clock, so the two always agree.
 
 The file itself is never uploaded (it is read in the browser), so **Download** builds the CSV from the rows the import kept:
 
@@ -572,6 +587,7 @@ The file itself is never uploaded (it is read in the browser), so **Download** b
 - A workbook with [child sheets](#parent-and-child-sheets) comes as a ZIP with one CSV per sheet, named after the sheet.
 - It is what this import wrote, not the records as they are now: a change made after the import, in Filament or by another app, is not in it. If you import the downloaded file again, the records changed since then show up in the review as **Changed**, back to the imported values, before anything is written.
 - It is UTF-8 with a byte order mark, so Excel opens it without garbled text. Once an import is pruned (below), its rows are gone and it cannot be downloaded.
+- **Formulas do not run.** A cell such as `=HYPERLINK("https://…", "Click")` would run as a formula when someone opens the file in Excel — and the person downloading is not always the one who imported it (an approver, for example). So cells that start with `=` or `@`, a tab or a line break, or with `+` or `-` when they are not a number or a phone number (`-500` and `+81 90-1234-5678` stay as they are), get an apostrophe in front: Excel shows them as text. The same goes for **Download failed rows**. When a file is imported, that apostrophe is taken off again, so a downloaded file that you fix and import comes back with the original values. The download's tooltip says so too.
 
 Imports left in the review for more than a day, and imports whose undo period has ended, are removed with Laravel's pruning (a paused import is kept until it is finished). The model is in a package, so name it in the schedule:
 
