@@ -5,6 +5,19 @@ All notable changes to `qalainau/filament-warp-import` will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.1.0] - 2026-11-06
+
+### Added
+
+- Instructions for AI coding assistants (Claude Code, Cursor, Codex) through [Laravel Boost](https://laravel.com/docs/boost):
+  a guideline that Boost adds to `CLAUDE.md` and `AGENTS.md`, and the `warp-import-development` skill for building
+  imports and testing them. Select `qalainau/filament-warp-import` in `php artisan boost:install`, or add it to
+  `"packages"` in `boost.json`. See [AI coding assistants (Laravel Boost)](README.md#ai-coding-assistants-laravel-boost).
+- `php artisan warp:assign-tenant "App\Models\Team" 1` (with `--dry-run`): for apps that add tenancy later, gives the imports, templates and schedules saved without a tenant to one tenant, so the tenant panel shows them. Every row without a tenant moves, in one transaction. The tenant is written as the class name, the way Warp Import stores it, also in apps with a morph map.
+- README: **Adding tenancy to an app that already has imports** and **Testing with tenancy** (how to open a tenant in a test, and what another team's IDs do: most are simply not shown, some answer 404).
+
 ## [1.0.0] - 2026-11-02
 
 ### Added

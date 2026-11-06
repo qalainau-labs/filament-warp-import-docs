@@ -120,6 +120,30 @@ Unlike Filament's `ImportAction`, Warp Import does not need the `imports`, `fail
 
 > Run `php artisan filament:assets` again after every update of the package.
 
+### AI coding assistants (Laravel Boost)
+
+Warp Import ships instructions for AI coding assistants such as Claude Code, Cursor and Codex. If your app uses
+[Laravel Boost](https://laravel.com/docs/boost), the assistant learns how to use Warp Import from them: where row rules belong (the importer), which options are built in (updating only some columns, records missing from the file, approval), what is easy to get wrong, and how to test an import.
+
+- **Guidelines** (`resources/boost/guidelines/core.md`): a short summary that Boost adds to `CLAUDE.md`,
+  `AGENTS.md` and the other agent files. It also points the assistant to this README in `vendor/`, so it reads the
+  documentation of the version you have installed instead of guessing.
+- **Skill** `warp-import-development` (`resources/boost/skills/`): the steps for adding an import, the built-in options to use instead of custom code, and feature and browser tests. The assistant loads it when it works on an import.
+
+Boost does not add guidelines of other vendors' packages on its own. When `php artisan boost:install` asks
+"Which third-party AI guidelines/skills would you like to install?", select `qalainau/filament-warp-import`. To do
+it without the question, add the package to `boost.json` and run the command again:
+
+```json
+{
+    "packages": ["qalainau/filament-warp-import"]
+}
+```
+
+```bash
+php artisan boost:install --guidelines --skills -n
+```
+
 ## Usage
 
 ### Replace the import action
@@ -747,6 +771,70 @@ To change the relationship name for the whole panel, use `->tenant(Team::class, 
   ```
 - **Queued imports remember the panel by its ID.** If you rename the panel's `->id()` while imports are queued, the job uses the first panel whose tenant model matches the import's tenant.
 - A record moved to another team after the import is not touched by undo.
+
+### Adding tenancy to an app that already has imports
+
+Imports, templates and schedules saved before you added `->tenant()` have no tenant, so a tenant panel does not show them: the history looks empty and templates are gone. Give them to one tenant with:
+
+```bash
+php artisan warp:assign-tenant "App\Models\Team" 1 --dry-run   # count the rows per table, change nothing
+php artisan warp:assign-tenant "App\Models\Team" 1
+```
+
+The first argument is the tenant model (or its morph alias), the second its key. The command moves **every** row without a tenant in `warp_import_runs`, `warp_import_templates` and `warp_import_schedules` (and in the tables of the other Warp plugins you have installed) to that tenant, in one transaction; rows that already have a tenant are not touched. The rows of an import (`warp_import_rows`) have no tenant of their own and stay with their import. Who started an import or owns a schedule does not change, so each person still sees only their own.
+
+Good to know:
+
+- **Your own records are yours to move.** The command only changes Warp's tables. Fill `team_id` of your products, categories and so on yourself, before or after.
+- **Afterwards, a panel without tenancy no longer shows these rows**, since they now belong to the tenant.
+
+### Testing with tenancy
+
+In your tests, open the panel and the tenant the way a request would, then test the pages as usual:
+
+```php
+use Filament\Facades\Filament;
+use Livewire\Livewire;
+use Qalainau\FilamentWarpImport\Models\ImportRun;
+use Qalainau\FilamentWarpImport\Pages\ImportHistory;
+
+beforeEach(function () {
+    $this->tokyo = Team::factory()->create();
+    $this->osaka = Team::factory()->create();
+    $this->user = User::factory()->hasAttached([$this->tokyo, $this->osaka])->create();
+    $this->actingAs($this->user);
+
+    Filament::setCurrentPanel('app');
+    Filament::setTenant($this->tokyo, isQuiet: true);
+    Filament::bootCurrentPanel();   // applies the resources' tenant scopes
+});
+
+it('shows each team only its own imports', function () {
+    // ...first import a file while Tokyo is the tenant
+    $tokyoRun = ImportRun::query()->where('tenant_id', (string) $this->tokyo->id)->sole();
+
+    Livewire::test(ImportHistory::class)->assertCanSeeTableRecords([$tokyoRun]);
+
+    Filament::setTenant($this->osaka, isQuiet: true);
+
+    Livewire::test(ImportHistory::class)->assertCanNotSeeTableRecords([$tokyoRun]);
+});
+```
+
+What another team's ID does — check for this, not for an exception, unless the line says 404:
+
+| What | Result |
+| --- | --- |
+| The history and the schedules pages | Not listed (`assertCanNotSeeTableRecords()`). |
+| Recent imports in the wizard, **Templates** | Not offered. Another team can save a template with the same name. |
+| Opening an import from the list of recent imports | Answered as if the import had been deleted, so nobody learns whether the ID exists. |
+| Opening the wizard with another team's import (`runId`), undoing it, applying or deleting another team's template by ID | **404** (`assertStatus(404)` on the Livewire test). |
+| Another team's records with the same key (SKU) | Not found: the row creates a new record for the current team (status **New**), it does not change theirs. |
+| A team the user does not belong to, in the URL | 404 from Filament, before the page opens. |
+
+To check what was written, query your models with `withoutGlobalScopes()` so a missing scope cannot hide a wrong team, for example `expect(Product::withoutGlobalScopes()->where('sku', 'A-1')->pluck('team_id')->all())->toBe([$this->tokyo->id])`.
+
+A queued import has no panel or tenant in the worker. In tests with `Queue::fake()`, run the job with the tenant cleared (`Filament::setTenant(null, isQuiet: true)`) to test what the worker does: the job restores the import's panel and team itself.
 
 ## Security
 
