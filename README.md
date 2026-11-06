@@ -42,6 +42,7 @@ protected function getHeaderActions(): array
 - [Parent and child sheets](#parent-and-child-sheets)
 - [Templates](#templates)
 - [Import history](#import-history)
+- [Testing](#testing)
 - [Multi-tenancy](#multi-tenancy)
 - [Security](#security)
 - [Limitations](#limitations)
@@ -623,6 +624,120 @@ Schedule::command('model:prune', ['--model' => [ImportRun::class]])->daily();
 ```
 
 Pruning removes the rows kept for review and undo; the imported records are not touched.
+
+## Testing
+
+The file is read in the browser, and the browser sends the cells to the wizard, a Livewire component (`Qalainau\FilamentWarpImport\Livewire\ImportWizard`). A feature test does the same: it opens the wizard with the options of your action and calls the methods the browser calls. The rows go through your importer, exactly as in the panel.
+
+Put two helpers in your test file (or in `tests/Pest.php`):
+
+```php
+use App\Filament\Resources\Products\Pages\ListProducts;
+use Livewire\Features\SupportTesting\Testable;
+use Livewire\Livewire;
+use Qalainau\FilamentWarpImport\Livewire\ImportWizard;
+
+/**
+ * Sends the rows to the import wizard of ListProducts and checks them, like dropping a file and pressing "Check".
+ *
+ * @param  list<string>  $headers  the first row of the file; here each header is the name of an importer column
+ * @param  list<list<string>>  $rows  the other rows, every cell a string
+ * @param  array<string, mixed>  $choices  what the user changes in the column step, e.g. ['sync' => true]
+ */
+function importProducts(array $headers, array $rows, array $choices = []): Testable
+{
+    // the options of the action on the page: the same importer and settings as in the panel
+    $options = Livewire::test(ListProducts::class)->instance()->getAction('warpImport')->getImportOptions()->toArray();
+    $wizard = Livewire::test(ImportWizard::class, ['options' => $options]);
+
+    $wizard->call('warpImportStart', [
+        'headers' => $headers,
+        'columns' => array_flip($headers),             // importer column name => position of its header in the file
+        'updateColumns' => $options['updateColumns'],  // the action's defaults, which the browser sends too (see below)
+        'keepBlanks' => $options['keepBlanks'],
+        ...$choices,
+    ], 'products.csv', count($rows));
+    $wizard->call('warpImportStage', 0, 2, $rows);     // sheet 0; the first row sent is row 2 of the file
+    $wizard->call('warpImportFinishStaging');
+
+    return $wizard;
+}
+
+/**
+ * Presses "Import" and writes every row that can be written, 200 at a time like the browser.
+ *
+ * @return array{created: int, updated: int, failed: int, removed: int, processed: int, total: int, done: bool}
+ */
+function writeImport(Testable $wizard): array
+{
+    $wizard->call('warpImportRun');
+
+    do {
+        $wizard->call('warpImportCommitNext', 200);
+    } while (! $wizard->effects['returns'][0]['progress']['done']);
+
+    return $wizard->effects['returns'][0]['progress'];
+}
+```
+
+A test with the action from the examples above, `->updateColumns(['price'])->keepBlankCells()->missingRecords(update: ['is_active' => false])`:
+
+```php
+use App\Models\Product;
+use App\Models\User;
+use Qalainau\FilamentWarpImport\Models\ImportRow;
+
+it('updates prices, creates new products, refuses a negative price and deactivates the rest', function () {
+    $this->actingAs(User::factory()->create());   // an import belongs to a user
+
+    Product::factory()->create(['sku' => 'A-1', 'name' => 'Kettle', 'price' => 1000]);
+    Product::factory()->create(['sku' => 'A-2', 'name' => 'Rake', 'price' => 2000]);
+
+    $wizard = importProducts(['sku', 'name', 'price'], [
+        ['A-1', 'Kettle XL', '1200'],
+        ['B-1', 'Mug', '800'],
+        ['B-2', 'Lamp', '-5'],
+    ], ['sync' => true]);   // the user ticks "products that are not in the imported data"
+
+    // the review: the rows of the file by their row number, and the products the file leaves out
+    expect(ImportRow::query()->where('number', '>', 0)->orderBy('number')->pluck('status', 'number')->map->value->all())
+        ->toBe([2 => 'update', 3 => 'create', 4 => 'error'])
+        ->and(ImportRow::query()->where('number', 4)->sole()->errors)->toHaveKey('price')
+        ->and(ImportRow::query()->where('status', 'missing')->pluck('record_id')->all())
+        ->toBe([(string) Product::query()->where('sku', 'A-2')->value('id')]);
+
+    expect(writeImport($wizard))->toMatchArray(['created' => 1, 'updated' => 1, 'removed' => 1, 'failed' => 0]);
+
+    expect(Product::query()->where('sku', 'A-1')->sole())
+        ->name->toBe('Kettle')   // not in updateColumns(), so the existing product keeps its name
+        ->price->toBe(1200)
+        ->and(Product::query()->where('sku', 'B-1')->sole()->name)->toBe('Mug')   // new products get every column
+        ->and(Product::query()->where('sku', 'B-2')->exists())->toBeFalse()      // rows with errors are never written
+        ->and(Product::query()->where('sku', 'A-2')->sole()->is_active)->toBeFalse();
+});
+```
+
+**`updateColumns()`, `keepBlankCells()` and `missingRecords()` only work through what the test sends.** These three are defaults of the column step: the browser reads them from the action, shows them as ticks the user can change, and sends the ticks to `warpImportStart`. The server uses only what it receives. A test that leaves them out of `warpImportStart` imports as if the user had unticked everything:
+
+| Sent to `warpImportStart` | Left out | What the browser sends |
+| --- | --- | --- |
+| `'updateColumns' => ['price']` | Every mapped column of existing records is overwritten. | The action's `updateColumns()` (the ticked columns); `null` means every column. |
+| `'keepBlanks' => true` | An empty cell is validated and written, as in Filament (a `required` column fails). | The action's `keepBlankCells()`. |
+| `'sync' => true` | Records that are not in the file are left alone. | Off for every import, until the user ticks it. It does nothing unless the action has `missingRecords()`. |
+
+So pass `$options['updateColumns']` and `$options['keepBlanks']` as in `importProducts()`, and `'sync' => true` when the test is about records that are not in the file. To test a user who changes a default, pass it in `$choices`: `['updateColumns' => null]` updates every column, `['keepBlanks' => false]` writes empty cells.
+
+Good to know:
+
+- **Cells are strings**, as read from the file (`'1200'`, not `1200`). The clean-up of each column (trimming, numbers, dates) runs on the server, as in the browser.
+- **`columns`** maps importer column names to header positions. A header that is not an importer column name needs its position by hand, for example `['sku' => 0, 'name' => 2]`; a column left out is not imported. When a column that is `requiredMapping()` is not mapped, `warpImportStart` returns `['errors' => ['columns' => [...]]]` and nothing is staged.
+- **The review** is in `Qalainau\FilamentWarpImport\Models\ImportRow`: `status` (`create`, `update`, `unchanged`, `error`, `skip`, and `missing` for records not in the file), `errors` (the messages by column), `number` (the row number in the file; `0` for records not in the file) and `record_id`. `warpImportFinishStaging` also returns the counts: `['counts' => ['create' => 1, 'update' => 1, 'error' => 1, 'missing' => 1, ...]]`.
+- **Leave rows out** before writing with `$wizard->call('warpImportExclude', [$row->id], true)`, as the user does with the checkbox in the review. This also keeps a record that is not in the file.
+- **Undo**: `$wizard->call('warpImportUndo')`, then `warpImportUndoNext` in a loop like `writeImport()` until `progress['done']`.
+- **Approval**: with `requireApproval()`, `warpImportRun` refuses to write (HTTP 409). Call `warpImportRequestApproval('note')` instead, then sign in as the approver, open the import the way the history does — `Livewire::test(ImportWizard::class, ['options' => ImportOptions::fromRun($run)->toArray(), 'runId' => $run->id])` with `Qalainau\FilamentWarpImport\ImportOptions` and the `ImportRun` from `Qalainau\FilamentWarpImport\Models\ImportRun` — and call `warpImportApprove()`.
+- **Queue**: from the `queue()` threshold on, `warpImportRun` returns `['queued' => true, ...]` and dispatches `Qalainau\FilamentWarpImport\Jobs\CommitImportRun` instead of writing. With `Queue::fake()`, assert it was pushed and run it with `$job->handle()` inside `Queue::assertPushed()`; `warpImportProgress` then returns `['status' => 'completed', ...]`. Do not loop on `warpImportCommitNext` for a queued import.
+- **Tenancy**: set the tenant first (see [Testing with tenancy](#testing-with-tenancy)).
+- `ImportWizard` and its `warpImport...` methods are the wizard's internals, not an API like the action's options, and they may change in a release. Keep the calls in the two helpers, so that only they need to change, and read the changelog when you update.
 
 ## Multi-tenancy
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-06
+
+### Changed
+
+- README: a "Testing" section with two helpers and a full feature test of an import (review, writing, a refused row,
+  records not in the file). It explains that `updateColumns()`, `keepBlankCells()` and `missingRecords()` only take
+  effect through what the test sends to `warpImportStart` (`updateColumns`, `keepBlanks`, `sync`), as the browser does;
+  a test that leaves them out overwrites every column.
+
 ## [1.1.0] - 2026-11-06
 
 ### Added
