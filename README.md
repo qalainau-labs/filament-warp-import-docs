@@ -92,7 +92,12 @@ There is no queue worker to set up: the browser sends the work in small steps an
 - PHP 8.3+
 - Laravel 12 or 13
 - Filament 5
-- SQLite, MySQL 8, MariaDB 10.11+ or PostgreSQL
+- SQLite, MySQL 8.0+, MariaDB 10.11+ or PostgreSQL 14+
+
+### Tested on
+
+Before each release, the full test suite runs on PHP 8.3, 8.4 and 8.5 × Laravel 12 and 13 × SQLite, MySQL, MariaDB and PostgreSQL, with each database at its newest and its oldest supported version: 42 combinations in all. A version is released only when every combination passes.
+[See the results for each release](https://github.com/qalainau-labs/filament-warp-import-docs/tree/main/test-runs).
 
 ## Installation
 
