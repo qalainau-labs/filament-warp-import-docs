@@ -269,6 +269,17 @@ When the user presses **Check**, the rows are sent to the server in chunks of up
 
 All of this happens inside a database transaction that is rolled back, so nothing your importer writes while checking — for example with `firstOrCreate()` in `resolveRecord()` — stays in the database. Hooks that act outside the database (sending mail, calling an API) do run, so keep those in `afterSave()`, which is not called while checking.
 
+Which hooks run when:
+
+| Hooks | While checking (review) | When the row is written |
+| --- | --- | --- |
+| `resolveRecord()`, `beforeValidate()`, `afterValidate()`, `beforeFill()`, `afterFill()` | yes | yes (again) |
+| `beforeSave()`, `beforeCreate()` / `beforeUpdate()`, `afterSave()`, `afterCreate()` / `afterUpdate()` | no | yes |
+
+- **Refusing a row** (a price cut that is too large, a rule that compares with the saved value): throw `RowImportFailedException` in `beforeValidate()` … `afterFill()`, or use a rule on the column. The review then shows the row as **Error** and the user can fix it. Thrown in `beforeSave()` or later, the review shows the row as **Changed** and it only fails when it is written.
+- **Calling an API, sending mail, writing files**: in `afterSave()` / `afterCreate()` / `afterUpdate()`. In a check hook they run once while checking (even if the user never imports) and again when the row is written. `$this->record->wasChanged('price')` in `afterUpdate()` tells you what was written.
+- **Refuse rather than skip**: returning `null` from `resolveRecord()` skips the row; it is not shown as an error and cannot be fixed. Throw `RowImportFailedException` for a row that is wrong.
+
 Numbers, dates and yes/no values are checked before your rules run. Filament reads `abc` in a numeric column as `0` and `いいえ` in a boolean column as `true`; Warp reports them as errors instead. The type of a column comes from the column itself (`numeric()`, `boolean()`, `enum()`, `relationship()`), the model's casts and the rules.
 
 ## Images and files
@@ -392,7 +403,7 @@ The same words appear in the confirmation before anything is written. With it ti
 - The file rows are written first, then the records that are not in the file are changed or deleted, each in its own savepoint. If the model has a policy, `update` or `delete` must allow each record; a record the database refuses to delete (a foreign key) is listed as failed with the reason.
 - The result counts them (**Marked** or **Deleted**) and **Undo** puts them back: changed records get their old values, soft-deleted records are restored, and other deleted records are inserted again with their original key and values. Records the database deleted along with them (cascades) are not restored, so prefer `update:` or soft deletes for records with children.
 
-The records considered are all records of the importer's model, in the current [tenant](#multi-tenancy). This only applies to the parent sheet, not to [child sheets](#parent-and-child-sheets). To narrow them — so that a price list of active products does not touch the archived ones — add a static method to the importer:
+The records considered are all records of the importer's model, in the current [tenant](#multi-tenancy). This only applies to the parent sheet, not to [child sheets](#parent-and-child-sheets). To narrow them — so that one supplier's price list does not touch other suppliers' products, or a price list of active products does not touch the archived ones — add a static method to the importer:
 
 ```php
 use Illuminate\Database\Eloquent\Builder;
@@ -405,6 +416,10 @@ class ProductImporter extends Importer
     }
 }
 ```
+
+`warpImportQuery()` only narrows the records that may count as not in the file. It does not narrow `resolveRecord()`: a row whose key belongs to a record outside it (another supplier's SKU in Acme's price list) still updates that record. Narrow the lookup in `resolveRecord()` too when that must not happen, for example `Product::query()->where('supplier', 'acme')->firstOrNew(['sku' => $this->data['sku']])`, or refuse the row there with `RowImportFailedException`.
+
+A row your importer skips by returning `null` from `resolveRecord()` keeps its record in the file when `resolveRecord()` looked that record up first (`$product = Product::firstOrNew([...]); if (...) return null;`), so the record is not deleted or changed. If the importer returns `null` without looking up exactly one record of the model, Warp cannot tell which record the row is, and that record counts as not in the file. To refuse a row, throw `RowImportFailedException` instead: rows with errors always keep their record.
 
 ## Updating existing records
 

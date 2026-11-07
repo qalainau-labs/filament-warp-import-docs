@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-07
+
+### Fixed
+
+- Records that are not in the file: a row your importer skips by returning `null` from `resolveRecord()` after
+  looking up its record (`$product = Product::firstOrNew([...]); if (...) return null;`) now keeps that record in the
+  file. Before, the record counted as not in the file and was changed, or deleted with `missingRecords(delete: true)`.
+  A later row of the same record is no longer marked as its duplicate.
+
+### Changed
+
+- README, the Boost guideline and the skill: which importer hooks run while checking and which only when a row is
+  written (refuse rows in `beforeValidate()` … `afterFill()`, call APIs and send mail in `afterSave()` /
+  `afterUpdate()`), refusing a row with `RowImportFailedException` instead of returning `null`, and that
+  `warpImportQuery()` narrows only the records not in the file, not `resolveRecord()`.
+
 ## [1.1.1] - 2026-11-06
 
 ### Changed
