@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-11-07
+
+### Changed
+
+- The protection for downloading from links (images, scheduled imports) is now shared with the other Warp plugins. It works as before; IPv4 addresses written inside IPv6 (`::ffff:10.0.0.1`) are checked by their IPv4 part in every case.
+
 ## [1.1.2] - 2026-11-07
 
 ### Fixed
