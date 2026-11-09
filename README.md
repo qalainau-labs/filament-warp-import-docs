@@ -269,7 +269,7 @@ When the user presses **Check**, the rows are sent to the server in chunks of up
 | **Changed** | An existing record whose attributes would change. The table shows the old value struck through and the new one; related records are shown by the attribute you resolve them by (`name`), not by their key. |
 | **Unchanged** | An existing record that would stay the same. It is not written. |
 | **Error** | A validation rule failed, a related record was not found, a number, date or yes/no value could not be read, or the importer threw `RowImportFailedException`. The message is shown next to the row and the cell is marked. |
-| **Duplicate** | An earlier row in the file points at the same record (the same existing record, or the same attributes for a new one, ignoring case). Only the first row is imported. Fixing either row updates both. |
+| **Duplicate** | An earlier row in the file points at the same record (the same existing record, or the same attributes for a new one, ignoring case). Only the first row is imported. Fixing either row updates both. Duplicates are counted on their own **Duplicates** card, not under **Errors**; **Skip all N rows with errors or duplicates** on either card skips both. A scheduled import treats them like errors. |
 | **Skipped** | The user skipped the row, or `resolveRecord()` returned `null`. |
 
 All of this happens inside a database transaction that is rolled back, so nothing your importer writes while checking — for example with `firstOrCreate()` in `resolveRecord()` — stays in the database. Hooks that act outside the database (sending mail, calling an API) do run, so keep those in `afterSave()`, which is not called while checking.
@@ -353,7 +353,7 @@ WarpImportAction::make()
 ```
 
 1. Import the file as usual: map the columns, set up the clean-up and value mapping, import.
-2. On the result, press **Run on a schedule…**. Give it a name, say where the file is — **At a link** or **In storage** (a disk you listed; the files on it are offered) — how often (every hour, day or week, at a time in the user's time zone) and what to do with rows that have errors.
+2. On the result, press **Run on a schedule…**. Give it a name, say where the file is — **At a link** or **In storage** (a disk you listed; the files on it are offered) — how often (every hour, day or week, at a time in the panel's time zone — `FilamentTimezone::set()` or `app.timezone`, shown next to the time and after **Next:** in the list) and what to do with rows that have errors.
 3. **Scheduled imports** in the navigation lists the user's schedules with the last run and the next one. **Run now** runs one at once; the menu has **Last import**, **Edit** (name, file, time, pause) and **Delete**.
 
 Each run:
@@ -485,7 +485,7 @@ Warp reads the semicolons, `1.234,50 €` → `1234.50`, `ja` → `1` and `31.12
 
 **Value mapping** (the ▾ menu on a column in the review) lists the different values of a column with the number of rows, unknown values first, and lets users choose what each becomes:
 
-- **Choice columns** — an enum (from `enum()`, the model's cast or a `Rule::enum()` rule) or an `in` rule — offer the options by label. A value that matches an option's label or value apart from case and width is suggested (`販売中` → `on_sale`).
+- **Choice columns** — an enum (from `enum()`, the model's cast or a `Rule::enum()` rule) or an `in` rule — offer the options by label. A value that is exactly an option's label or value, apart from upper and lower case (`Gold`, `United States`, `販売中`), is mapped on its own while checking, so it is not an error; the mapping is saved with the others and shown as chosen. A value that matches only apart from width or spaces (`ＧＯＬＤ`, `販売 中`) is suggested in the window.
 - **Related records** offer the records of the relationship, searched as you type, by the attribute you resolve them by. A value that matches one apart from case and width is suggested (`kitchen` → `Kitchen`).
 - **Yes / no** columns offer yes and no.
 - Columns with several values in a cell (`->multiple(',')`) are mapped value by value.

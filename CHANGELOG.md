@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-10
+
+### Changed
+
+- Values that are exactly the name (label) or the value of an option, apart from upper and lower case (`Gold`, `United States`), are now mapped on their own while checking, and saved in the value mapping, so they are no longer errors. Values that only look alike (spaces, full-width letters) are still suggested in the value mapping window.
+- The review counts rows that point at the same record as another row under a new "Duplicates" card (blue, like their label) instead of "Errors" (the card shows only when there are such rows). `RowQueries::counts()` has a new `duplicate` count. On the Errors or Duplicates card, **Skip all N rows with errors or duplicates** skips both kinds at once, as "Skip all rows with errors" did before. Scheduled imports still treat these rows like errors (stop, or skip them).
+- Scheduled imports made from an import now use the panel's time zone (the same as the history and `config('app.timezone')`), not the browser's. The list of scheduled imports shows the time zone after "Next:", writes the time in 24 hours like "Every day at 06:00", and shows a "Not run yet" badge instead of "—".
+- In the value mapping window, the field for related records looks like a search field (a magnifying glass, "Search", no ▼), with a line that says how to search and what an empty field does. The message of a duplicate row is no longer red.
+- The history column "Records" is now "Imported into" (it shows the kind of records, not a number).
+- French: "Importer des :label" and the heading "Importation : :label".
+
+### Fixed
+
+- On phones, "Run now" in the list of scheduled imports no longer ends up outside the table: the list is stacked on phones, and "Run now" is an outlined button.
+
 ## [1.1.3] - 2026-11-07
 
 ### Changed
