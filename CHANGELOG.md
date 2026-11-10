@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-10
+
+### Fixed
+
+- The "Records" column of the import history, the approval request notification and the names of the child imports now use the plural label of the panel resource for the model (`getTitleCasePluralModelLabel()`, so in the app's language, such as 「商品」), instead of the English class name (`Products`). Without a resource for the model, the class name is used as before.
+
 ## [1.2.0] - 2026-11-10
 
 ### Changed
