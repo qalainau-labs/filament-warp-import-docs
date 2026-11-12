@@ -91,7 +91,7 @@ There is no queue worker to set up: the browser sends the work in small steps an
 
 - PHP 8.3+
 - Laravel 12 or 13
-- Filament 5
+- Filament 5.10 or later
 - SQLite, MySQL 8.0+, MariaDB 10.11+ or PostgreSQL 14+
 
 ### Tested on
