@@ -5,6 +5,12 @@ All notable changes to `qalainau/filament-warp-import` will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-11-15
+
+### Added
+
+- `canAccessUsing()` and `canWriteUsing()` on `WarpImportPlugin` decide, from your app's roles, who can open the history, the scheduled imports and your `ImportPage`s, and who can only look at them. An `ImportPage` can also override `canWrite()`. See [Restricting pages per role](README.md#restricting-pages-per-role).
+
 ## [1.2.3] - 2026-11-14
 
 ### Fixed

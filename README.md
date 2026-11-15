@@ -645,6 +645,56 @@ Schedule::command('model:prune', ['--model' => [ImportRun::class]])->daily();
 
 Pruning removes the rows kept for review and undo; the imported records are not touched.
 
+### Restricting pages per role
+
+When your app has its own roles — some people may not use a screen at all, others may only look — decide it per page with the plugin:
+
+```php
+use Qalainau\FilamentWarpImport\Pages\ImportHistory;
+use Qalainau\FilamentWarpImport\WarpImportPlugin;
+
+WarpImportPlugin::make()
+    ->canAccessUsing(fn (User $user, string $page): bool => $user->canOpen($page))
+    ->canWriteUsing(fn (User $user, string $page): bool => ! $user->isReadOnlyOn($page))
+```
+
+`$page` is the class of the page:
+
+- `Qalainau\FilamentWarpImport\Pages\ImportHistory` — the import history.
+- `Qalainau\FilamentWarpImport\Pages\ImportSchedules` — the list of [scheduled imports](#scheduled-imports).
+- Your own [`ImportPage`](#a-page-instead-of-a-modal) classes, for example `App\Filament\Resources\Products\Pages\ImportProducts`, when the panel has the plugin.
+
+What they do:
+
+- **`canAccessUsing()` false:** the page leaves the menu, opening it answers 403, and every Livewire call to a page that is already open answers 403 too — also the calls of the wizard on that page and in the history's **Open**. The *Last import* link of a schedule is hidden when the history is closed.
+- **`canWriteUsing()` false:** the page opens read-only.
+  - **History:** **Open** shows the result and the review, but there is no undo, resume, *Fix the rows that were not imported*, *Run on a schedule…*, approve, send back or withdraw. **Download** still works.
+  - **Scheduled imports:** *Run now*, *Edit* and *Delete* are hidden.
+  - **`ImportPage`:** the wizard shows the recent imports to open, without the file picker; nothing can be imported.
+  - Calling the wizard's writing methods directly (`warpImportStart`, `warpImportRun`, `warpImportUndo`, `warpImportApprove`, …) answers 403 and changes nothing.
+- **Still there when read-only:** the tables, filters and search, opening an import to look at it, its rows and **Download**.
+
+Both are added to the existing rules with *and*: the resource's policy for an `ImportPage`, who sees which import, and who may approve still decide, and these callbacks can't let more people in. People who are not signed in get `false`. Without the callbacks, nothing changes. The import action (`WarpImportAction`) on your resource pages is not affected — hide it with `visible()` as before.
+
+An `ImportPage` can also be made read-only without the plugin, by overriding `canWrite()`:
+
+```php
+class ImportProducts extends ImportPage
+{
+    protected static string $resource = ProductResource::class;
+
+    public static function canWrite(): bool
+    {
+        return auth()->user()?->can('import', Product::class) ?? false;
+    }
+
+    public function import(Import $import): Import
+    {
+        return $import->importer(ProductImporter::class);
+    }
+}
+```
+
 ## Testing
 
 The file is read in the browser, and the browser sends the cells to the wizard, a Livewire component (`Qalainau\FilamentWarpImport\Livewire\ImportWizard`). A feature test does the same: it opens the wizard with the options of your action and calls the methods the browser calls. The rows go through your importer, exactly as in the panel.
