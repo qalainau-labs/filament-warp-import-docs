@@ -30,6 +30,7 @@ protected function getHeaderActions(): array
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage](#usage)
+- [Header row](#header-row)
 - [How rows are checked](#how-rows-are-checked)
 - [Images and files](#images-and-files)
 - [Approval](#approval)
@@ -69,7 +70,8 @@ There is no queue worker to set up: the browser sends the work in small steps an
 ![Values in the file mapped to the options of the column](https://raw.githubusercontent.com/qalainau-labs/filament-warp-import-docs/main/art/values.png)
 
 - **Your Filament importers, unchanged**: columns, `rules()`, `relationship()`, `castStateUsing()`, `fillRecordUsing()`, `resolveRecord()`, the hooks (`beforeSave()` and so on), `getOptionsFormComponents()` and `getCompletedNotificationBody()` all work as with `ImportAction`.
-- **CSV, TSV, Excel and pasted cells**: `.csv`, `.tsv` and `.xlsx`; UTF-8, or the encoding Excel saves CSV in for its language — Windows-1252 (Western Europe and the Americas), Shift_JIS, Korean CP949, Chinese GBK or Big5 — told apart from the file, with an **Encoding** menu in case letters look wrong; every sheet of a workbook, Excel dates as dates. Or paste a block of cells from Excel or Google Sheets. Files are read in the browser and never uploaded.
+- **CSV, TSV, Excel, OpenDocument and pasted cells**: `.csv`, `.tsv`, `.xlsx`, `.ods` and `.xls`; UTF-8, or the encoding Excel saves CSV in for its language — Windows-1252 (Western Europe and the Americas), Shift_JIS, Korean CP949, Chinese GBK or Big5 — told apart from the file, with an **Encoding** menu in case letters look wrong; every sheet of a workbook, Excel dates as dates. Or paste a block of cells from Excel or Google Sheets. CSV, TSV and .xlsx files are read in the browser. .ods and .xls files are uploaded to the server for reading and deleted immediately afterwards.
+- **[Header row](#header-row)**: detect or choose the header row, skip titles above it, or import every row without headers.
 - **Column mapping** guessed from your column names, labels and `guess()`, ignoring case, width and separators, with the first values of each column next to it.
 - **Review before writing**: every row is new, changed (with the old and new value of each field, related records by name), unchanged or an error. Rows that point at the same record are flagged. Filter by outcome and scroll through 100,000 rows.
 - **Fix in place**: double-click a cell (double-tap on a phone or tablet, or press Enter) to change the value from the file and the row is checked again. Skip single rows or every row with an error. Find and replace in a column.
@@ -120,7 +122,7 @@ php artisan migrate
 php artisan filament:assets
 ```
 
-The migration creates three tables: `warp_import_runs` (one row per import), `warp_import_rows` (the rows of an import while it is reviewed, and what is needed to undo it) and `warp_import_templates`. Your tables are not changed. To edit the migration, publish it with `php artisan vendor:publish --tag=filament-warp-import-migrations`. Publish it before you run `php artisan migrate` for the first time: Warp Import then runs your copy instead of its own. If the tables already exist, change them with a migration of your own instead.
+The migrations create four tables: `warp_import_runs` (one row per import), `warp_import_rows` (the rows of an import while it is reviewed, and what is needed to undo it), `warp_import_templates` (saved column mappings) and `warp_import_schedules` (scheduled imports). Your tables are not changed. After updating the package, run `php artisan migrate` again: 1.4.0 adds an index that starts with the tenant columns to `warp_import_templates` and `warp_import_schedules` (indexes only, no data changes). To edit the migrations, publish them with `php artisan vendor:publish --tag=filament-warp-import-migrations`. Publish it before you run `php artisan migrate` for the first time: Warp Import then runs your copy instead of its own. If the tables already exist, change them with a migration of your own instead.
 
 Unlike Filament's `ImportAction`, Warp Import does not need the `imports`, `failed_import_rows` and `job_batches` tables, or a queue worker.
 
@@ -259,6 +261,25 @@ and register it in the resource's `getPages()`, for example `'import' => ImportP
 | `->keepBlankCells()` | off | For existing records, an empty cell leaves the current value instead of clearing it. Users can change it in the column step. See [Updating existing records](#updating-existing-records). |
 | `->updateColumns(['price', 'stock'])` | all columns | The columns that may change on existing records; the others are only used for new records. Users can change it in the column step. |
 
+### Sample file
+
+The file step offers CSV and Excel (.xlsx) samples by default. Headers use the panel's column labels, or
+`ImportColumn::exampleHeader()` when set. Add sample values with `example()` or `examples()`:
+
+```php
+ImportColumn::make('sku')->label('SKU')->examples(['K-100', 'K-200']),
+ImportColumn::make('name')->exampleHeader('Product name')->example('Kettle'),
+```
+
+Examples line up by row; shorter columns have blank cells, and columns without examples only supply a header.
+Excel includes a parent sheet and one sheet per `->child()`, named with its `sheet` or label. Each child sheet
+starts with the parent's key column and its example values. CSV contains only the parent sheet.
+
+Use `->sampleFile(false)` on the action or import page to hide and disable downloads. People who can open the
+page can download a sample, including those with read-only access. Excel writes every cell as text so examples
+cannot run as formulas. CSV uses the same formula protection as other downloads: an apostrophe before `=`, `@`,
+tabs and newlines, and before `+` or `-` when the value is not a number or phone number.
+
 ## How rows are checked
 
 When the user presses **Check**, the rows are sent to the server in chunks of up to 1,000 rows (and under Livewire's 1 MB request limit). Each row goes through your importer exactly as Filament would import it — `remapData()`, `castData()`, `resolveRecord()`, the mapping checks, `beforeValidate()`, `validateData()`, `afterValidate()`, `beforeFill()`, `fillRecord()`, `afterFill()` — and stops before `saveRecord()`. Warp then reads which attributes of the record would change.
@@ -358,7 +379,7 @@ WarpImportAction::make()
 
 Each run:
 
-- **Fetches the file**: CSV, TSV, text or `.xlsx` (the first sheet), UTF-8, UTF-16 or the encoding of the first import (Windows-1252, Shift_JIS, CP949, GBK or Big5), up to 100 MB. A Google Sheets share link (`https://docs.google.com/spreadsheets/d/…/edit#gid=0`) is turned into its CSV export; the spreadsheet must be shared with anyone who has the link.
+- **Fetches the file**: CSV, TSV, text, `.xlsx`, `.ods` or `.xls` (the first nonempty sheet), UTF-8, UTF-16 or the encoding of the first import (Windows-1252, Shift_JIS, CP949, GBK or Big5), up to 100 MB. A Google Sheets share link (`https://docs.google.com/spreadsheets/d/…/edit#gid=0`) is turned into its CSV export; the spreadsheet must be shared with anyone who has the link.
 - **Maps the columns by their header names**, so a file with the columns in another order, or with extra columns, still works. If a mapped header is gone, the run fails and names it.
 - **Checks every row** exactly like the review, with the clean-up, value mapping, [update settings](#updating-existing-records), importer options and [records not in the file](#records-that-are-not-in-the-file) of the first import, as the user who created the schedule, in the same panel and tenant.
 - **Rows with errors**: by default the run stops before writing anything and notifies the user; **Last import** (or the notification's **Review**) opens it in the review to fix the rows and import by hand. Choose **Skip those rows and import the rest** to write the good rows anyway; the list says how many were skipped.
@@ -373,11 +394,11 @@ The list shows the outcome of the last run: **Imported** (with the counts), **Im
 | Argument | Default | |
 | --- | --- | --- |
 | `$condition` | `true` | A bool or closure: who may create schedules (`fn () => auth()->user()->isAdmin()`). |
-| `disks` | `[]` | The Laravel disks users may pick files from, for example an `sftp` or `s3` disk your supplier uploads to. The `.csv`, `.tsv`, `.txt` and `.xlsx` files on them are offered in the form. Empty: links only. |
+| `disks` | `[]` | The Laravel disks users may pick files from, for example an `sftp` or `s3` disk your supplier uploads to. The `.csv`, `.tsv`, `.txt`, `.xlsx`, `.ods` and `.xls` files on them are offered in the form. Empty: links only. |
 | `urls` | `true` | Allow links. `false` allows files on the `disks` only. |
 | `privateNetwork` | `false` | Allow links to internal network addresses. |
 
-- **Security**: links are checked like [image links](#images-and-files) — `http` and `https` only, and internal network addresses are refused when the schedule is saved and again on each run, including where a redirect leads. Only the disks you list can be read, and only `.csv`, `.tsv`, `.txt` and `.xlsx` files on them (when the schedule is saved, edited and run). The form lists those files to everyone who may create schedules, so list a disk that holds import files only.
+- **Security**: links are checked like [image links](#images-and-files) — `http` and `https` only, and internal network addresses are refused when the schedule is saved and again on each run, including where a redirect leads. Only the disks you list can be read, and only `.csv`, `.tsv`, `.txt`, `.xlsx`, `.ods` and `.xls` files on them (when the schedule is saved, edited and run). The form lists those files to everyone who may create schedules, so list a disk that holds import files only.
 - Each user sees and changes only their own schedules (in the current tenant). A schedule runs with its creator's permissions; if they can no longer import there — they left the tenant, or `canAccessPanel()` now says no — the run fails. Queued imports pause the same way.
 - [Parent and child sheets](#parent-and-child-sheets) cannot be scheduled yet.
 - `->maxRows()` applies to each run.
@@ -445,6 +466,28 @@ WarpImportAction::make()
 ```
 
 Both settings apply to the parent sheet and to [child sheets](#parent-and-child-sheets) alike; "Update saved data" is chosen per sheet.
+
+## Combining and splitting columns
+
+In the Columns step, choose **Combine or split** beside a field. Use **Add other columns to this one** to
+join, for example, prefecture, city and street into an address. Add headers in the order you want, remove
+one by clicking its name, and choose the text between values (a space by default, up to five characters,
+or empty for no separator). Each value is trimmed and empty cells are skipped.
+
+Use **Split this column and use one part** to map a full name to separate family and given name fields.
+Choose the same file column for both fields, then select part 1 for one and part 2 for the other. The default
+space separator treats consecutive spaces, full-width Japanese spaces and tabs as a single separator,
+ignoring surrounding whitespace. A custom separator of up to five characters is matched literally;
+consecutive separators keep empty parts. Choose parts 1–10, the last part, or the second-to-last part.
+A missing part is empty.
+
+Combining and splitting are alternatives: selecting one clears the other. **Undo** restores the original
+column value. The first three rows show the result before clean-up and value mapping. Child sheets have
+the same controls. Choosing another sheet or header row clears these settings.
+
+Templates and scheduled imports remember additional columns by header name, so reordering the file's
+columns keeps the same result. Templates omit additional headers absent from the new file; scheduled
+imports stop and report the missing headers. Templates also remember split separators and part numbers.
 
 ## Clean-up and value mapping
 
@@ -549,6 +592,21 @@ class OpenAiSuggester implements SuggestsMappings
 
 Throw a `RuntimeException` with a message for the user when the service fails.
 
+### Changing values in words
+
+With `->aiSuggestions()`, the review's value mapping panel also lets users ask for changes such as adding phone-number hyphens or removing a `JP-` prefix. **The instruction and up to 20 distinct values from this column are sent to the AI provider (Anthropic by default).** The provider returns up to five regular-expression replacement rules, not executable code. The server previews changes across up to 2,000 distinct values, showing up to 20 before/after examples. Users check the preview before choosing **Apply**, or cancel without changing anything. Applied rules remain visible and can be removed; applying or removing them checks the rows again. Templates and scheduled imports keep the rules.
+
+Use `->aiSuggestions(rewrites: false)` to keep mapping suggestions without this field. It is also hidden with `samples: false`. Custom suggesters passed with `using:` must implement both `Ai\SuggestsMappings` and `Ai\SuggestsRewrites` to offer this feature:
+
+```php
+public function rewrites(array $field, string $instruction, array $values): array
+{
+    return ['rules' => [['find' => '^JP-', 'replace' => '']], 'note' => null];
+}
+```
+
+Patterns have no delimiters and run with the Unicode (`u`) modifier, in order, before the configured transforms and value mapping. Replacement backreferences are limited to `$0`–`$9` and `${0}`–`${9}`. Requests that cannot be expressed as these rules return an empty `rules` list and an explanatory `note`.
+
 ## Importing and undoing
 
 ![The result of an import with the option to undo it](https://raw.githubusercontent.com/qalainau-labs/filament-warp-import-docs/main/art/undo.png)
@@ -598,6 +656,36 @@ The child importer is an ordinary importer for the child model. It needs **no co
 - Orders are written before items. An item whose order failed to save fails too.
 - Undo removes the items before the orders.
 - `->child()` can be called more than once for several child sheets. Templates cover the main sheet.
+
+### One sheet with parent and child rows
+
+A CSV or Excel sheet can repeat the parent key on each detail row:
+
+| Order no | Customer | Date | Product | Quantity |
+| --- | --- | --- | --- | --- |
+| A-1 | Yamada | 2026-11-01 | Apple | 2 |
+| A-1 | Yamada | 2026-11-01 | Orange | 1 |
+| A-2 | Sato | 2026-11-02 | Pear | 3 |
+
+Choose **Same sheet as Orders** for the child: this creates two orders and three items. Parent and child mappings use the same headers and header row. The link column follows the parent's mapping for `parentColumn`. Review and history retain the file's original row numbers.
+
+The wizard selects this automatically when the parent is the workbook's only sheet with rows and at least one child field matches a header other than the parent key. Users can choose **Not imported** instead. To start with the same sheet selected even in a workbook with several sheets:
+
+```php
+WarpImportAction::make()
+    ->importer(OrderImporter::class)
+    ->child(OrderItemImporter::class, 'order', 'order_no', sameSheet: true);
+```
+
+**Only the first row for each parent key is used for the parent's values.** Later rows with the same key still become children, but their parent values are ignored. Keys are compared as trimmed strings, even when matching rows are apart. Rows with an empty or missing key are kept as separate parent rows for the usual validation.
+
+## Header row
+
+Files can have a title, company name or export date above the table. The wizard automatically looks for a header among the first 20 nonblank rows: it chooses the first row with enough filled cells and at least half of them looking like text rather than numbers, dates or times. You can choose another **Header row** above the column mapping; rows above it are skipped. Child sheets are detected separately.
+
+Choose **No header row (import every row)** to keep the first row as data. Columns are then named `Column 1`, `Column 2` and so on in every language. Files beginning with only numbers, dates or times can be detected this way automatically; check the selection before importing.
+
+Templates keep the selected header row and restore it before applying their column mappings. Automatic template matching uses the detected headers. Scheduled imports always use the saved header row, without detecting it again; older schedules use the first row. Row numbers in the review and history include skipped title rows, with blank rows excluded as before.
 
 ## Templates
 
@@ -1052,9 +1140,23 @@ In the review table:
 | Enter / Esc (while changing) | Save / cancel |
 | Space | Import or skip the row |
 
+## .ods and .xls
+
+OpenDocument spreadsheets (`.ods`) and Excel 97–2003 workbooks (`.xls`) are uploaded to the server for reading and deleted immediately afterwards, including when reading fails. Import history keeps the filename only. Both formats have a 20 MB limit; scheduled imports use the same limit. CSV, TSV and `.xlsx` continue to be read in the browser.
+
+ODS uses OpenSpout, already installed with Filament. To enable `.xls`, install the optional dependency:
+
+```sh
+composer require phpoffice/phpspreadsheet
+```
+
+PhpSpreadsheet 5.9 or later is required: earlier versions can loop forever on some damaged `.xls` files, so Warp Import treats them as not installed. Without it, users are asked to save the file as `.xlsx` or CSV and choose it again.
+
+Livewire's temporary upload limit also applies (`livewire.temporary_file_upload.rules`, 12 MB by default). Raise that limit in the application to accept files up to 20 MB. ODS archive expansion and spreadsheet cell counts are checked before reading; excessive repetitions are refused.
+
 ## Limitations
 
-- Formulas in Excel files are imported as their last calculated values, and only the first 16,384 columns are read. `.xls` (Excel 97–2003) is not supported; save the file as `.xlsx` or CSV.
+- Formulas in Excel files are imported as their last calculated values, and only the first 16,384 columns are read. `.xls` (Excel 97–2003) requires the optional PhpSpreadsheet dependency (see [.ods and .xls](#ods-and-xls)).
 - Undo does not detach records attached with `belongsToMany` and does not undo side effects of your hooks.
 - `fillRecordUsing()` closures that change attributes other than the column's own are shown under "Problems" as extra changes, by attribute name.
 - Hooks that act outside the database run while rows are checked (see [How rows are checked](#how-rows-are-checked)).

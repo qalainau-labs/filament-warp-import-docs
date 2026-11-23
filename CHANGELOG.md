@@ -5,6 +5,30 @@ All notable changes to `qalainau/filament-warp-import` will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-23
+
+### Added
+
+- Read OpenDocument (.ods) spreadsheets and Excel 97–2003 (.xls) workbooks, with optional PhpSpreadsheet support for .xls (5.9 or later; earlier versions can hang on damaged .xls files and are treated as not installed), including scheduled imports.
+
+- Download CSV and Excel sample files from the file step, using importer example headers and values, with child sheets in Excel and a `sampleFile(false)` option.
+
+- Ask AI to change column values in words, review before/after examples, and apply or remove validated replacement rules. Templates and scheduled imports keep the rules. Only with `->aiSuggestions()` (`rewrites: false` hides it); the values of that column are sent to the AI provider. Custom suggesters implement the new `Ai\SuggestsRewrites` interface.
+
+- Combine columns or split a column into selected parts in the mapping step, with previews, value mapping, child sheets, templates and scheduled imports.
+
+- Import parents and children from one sheet of detail rows, with automatic selection, a `sameSheet: true` default, and original file row numbers.
+
+- Choose the header row, skip title rows above the table, or import every row without headers. Templates and scheduled imports keep the choice.
+
+### Changed
+
+- New migration `update_warp_import_add_tenant_indexes` adds an index on `(tenant_type, tenant_id, importer)` to `warp_import_templates` and `warp_import_schedules`, so saved mappings and scheduled imports are looked up within one tenant. Indexes only: no data changes, and an app that already added the same index keeps its own. Run `php artisan migrate`.
+
+- Upload .ods and .xls files to the server for reading, then immediately delete the temporary files. CSV, TSV and .xlsx files continue to be read in the browser.
+
+- Detect the header row automatically by default, including child sheets and pasted cells. Previously the first row was always used as the header.
+
 ## [1.3.1] - 2026-11-20
 
 ### Fixed
