@@ -5,6 +5,40 @@ All notable changes to `qalainau/filament-warp-import` will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.4.1] - 2026-11-24
+
+### Fixed
+
+- **Result counts of an import with child sheets**: after importing orders and their items, the "All", "Created", "Updated" and "Failed" counts showed the total of every sheet (13 = 4 orders + 9 items) while the table below showed only the selected tab's rows. The counts now belong to the selected tab, like the table.
+
+- **Problems with two or more columns**: when a row had errors in two columns with choices (for example Country and Rank), the Problems column shortened both messages and their "Choose…" buttons until none could be read ("Cou… Choose… Ra… Choose…"). "Choose…" is now in the cell with the value, and the Problems column reads as one sentence, shortened at the end (hover for all of it).
+
+- **"Sheet 1" for a CSV with child sheets**: in the mapping step, the parent's tab is named after what is imported (for example "Orders"), as in the review, and the child's sheet menu no longer lists the parent's own sheet, which could not be chosen.
+
+- **Blank review table while the rows load**: after "Check", the table showed only its headers for about a second. It now says "Loading…" until the first rows arrive.
+
+- **Message for required fields without a column**: pressing Check with a required field left on "Do not import" showed only the field's name in red ("Code") and kept it after a column was chosen or AI matched it. It now says "Choose a column for: Code." in the panel's language, and updates or disappears as the columns are chosen.
+
+### Changed
+
+- When an import has child sheets, the parent's review tab is named after what is imported (for example "Orders") instead of the file's sheet name ("Sheet 1" for a CSV), and the import button counts each part in words: "Import 4 orders · 9 order items".
+
+- The value mapping window puts its two AI tools in separate, headed boxes ("Let AI choose for values that can't be imported" and "Ask AI to change the values in words"). While an AI change is waiting to be applied or discarded, the window's Apply button is disabled and says why.
+
+- In the mapping step, the file column menus are wide enough for the header names and "Do not import", opening "Combine or split" no longer changes the widths of the table's columns, and "First values" shows the combined or split values.
+
+- In the review, the Problems column is narrower (16rem) so more of the file's columns fit, and the column menu buttons are larger, with a chevron icon and a background.
+
+- A value that is not one of a column's choices is described in the panel's language ("Country “UK” is not one of the choices.") instead of the app's validation message, and values are quoted the way each language quotes them.
+
+- The value mapping window explains each AI tool in one line, and the example in "Ask AI to change the values in words" follows the column (choices, numbers, dates or text) instead of always being about phone numbers. After an AI change is applied or removed, the review says so ("AI changed 4 values in “Phone”."). For columns without choices, the field for each value is a plain field ("Keep as it is") instead of a search field, with a line that explains it.
+
+- Model names inside sentences are written as in the middle of a sentence ("Same sheet as orders", "Sheet for order items"), and the import heading uses the sentence form in languages other than English and German ("Importar clientes" instead of "Importar Clientes").
+
+- Wording: Japanese uses 「取り込んだデータ」 everywhere and a shorter required-for-new badge (「新規は必須」), Korean avoids the 이(가) form and uses one kind of quotes, Spanish uses «…» quotes, and French keeps « and » on the same line as the quoted words and titles the window "Importer des clients".
+
 ## [1.4.0] - 2026-11-23
 
 ### Added

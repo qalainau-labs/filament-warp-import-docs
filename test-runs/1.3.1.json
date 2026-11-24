@@ -1,5 +1,11 @@
 {
     "version": "1.3.1",
+    "browser": {
+        "scope": "all",
+        "scripts": 27,
+        "total": 27,
+        "since": null
+    },
     "tested_on": "2026-11-20",
     "combinations": 42,
     "passed": 42,
