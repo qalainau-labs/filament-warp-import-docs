@@ -1,5 +1,7 @@
 {
     "version": "1.2.2",
+    "scope": "full",
+    "since": null,
     "browser": {
         "scope": "all",
         "scripts": 25,

@@ -1,5 +1,7 @@
 {
     "version": "1.2.0",
+    "scope": "full",
+    "since": null,
     "browser": null,
     "tested_on": "2026-11-10",
     "combinations": 42,

@@ -1,5 +1,7 @@
 {
     "version": "1.4.1",
+    "scope": "full",
+    "since": null,
     "browser": {
         "scope": "all",
         "scripts": 33,

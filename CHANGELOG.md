@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-11-25
+
+### Fixed
+
+- **Result counts when some rows had no changes**: rows whose values were already the same as the record are not written, but the result had no count for them, so the counts did not add up (for example "All 4" with every other count at 0). The result now has an "Unchanged" tab (shown when there are such rows), and the "Not imported" table no longer lists them, so it matches its count.
+- **Template notice after choosing "None"**: after a template was applied, choosing "None" in the template menu still said "Applied the template “…”." The notice now goes away.
+- **Values hidden by "Choose…"**: in a narrow column, a value that is not one of the choices was cut short by the "Choose…" button next to it (for example "Deutschla… Auswählen…"). When the value does not fit, the button now shows only ▾ (its name stays in the tooltip and for screen readers).
+- **Two names for the same rows in the review**: the badge of a row with no changes said "Same" while its filter said "Unchanged" (and "Change" next to "Changed"). The badges now use the filters' names in every language.
+
 ## [1.4.1] - 2026-11-24
 
 ### Fixed
