@@ -76,7 +76,7 @@ There is no queue worker to set up: the browser sends the work in small steps an
 - **Review before writing**: every row is new, changed (with the old and new value of each field, related records by name), unchanged or an error. Rows that point at the same record are flagged. Filter by outcome and scroll through 100,000 rows.
 - **Fix in place**: double-click a cell (double-tap on a phone or tablet, or press Enter) to change the value from the file and the row is checked again. Skip single rows or every row with an error. Find and replace in a column.
 - **Clean-up** per column: trim, numbers like `$1,200` and `(300)`, dates like `Oct 20, 2026`, `2026/10/20` and Excel serials, yes/no like `Y` / `N` — European files with decimal commas (`1.234,56 €`), `31.12.2026`, `31/12/2026` and month names in German, French, Spanish, Italian and Portuguese — and the Japanese forms too: full-width digits, `１，２００円`, `△300`, `令和8年10月20日`, はい／いいえ and ○／×, postal codes and phone numbers. Numbers, dates and yes/no values that Filament would silently turn into `0` or `true` become errors instead.
-- **AI suggestions** (optional): **Suggest with AI** maps headers like "Client ID" or "Mail" and values like "England" or "VIP" with Claude — you check them before anything is imported.
+- **AI suggestions** (optional): **Suggest with AI** maps headers like "Client ID" or "Mail" and values like "England" or "VIP" through your AI gateway — you check them before anything is imported.
 - **Value mapping**: the different values of a column with their row counts, unknown values first, mapped to the column's options (enums, `in` rules), related records or yes/no, with suggestions. An invalid value in the review has a **Choose…** button that opens it.
 - **Undo** for 30 days: created records are deleted, changed ones get their old values back. Records someone changed after the import are kept and listed.
 - **Parent and child sheets**: orders and their items, in two sheets of one workbook, in one import.
@@ -256,7 +256,7 @@ and register it in the resource's `getPages()`, for example `'import' => ImportP
 | `->files('image', disk: 'public', directory: 'products')` | — | An image or file column: a link or a file name from a ZIP, downloaded or extracted when the row is written. See [Images and files](#images-and-files). |
 | `->requireApproval(fn () => User::role('manager')->get(), when: fn (User $user) => ! $user->isManager())` | off | Someone else approves an import before it is written. See [Approval](#approval). |
 | `->schedules(disks: ['supplier'])` | off | Lets users run an import again on a schedule, from a link or a file on a disk. See [Scheduled imports](#scheduled-imports). |
-| `->aiSuggestions()` | off | **Suggest with AI** in the column step and the value mapping, with Claude. See [AI suggestions](#ai-suggestions). |
+| `->aiSuggestions()` | off | **Suggest with AI** in the column step and the value mapping, through your AI gateway. See [AI suggestions](#ai-suggestions). |
 | `->missingRecords(delete: true)` / `->missingRecords(update: ['is_active' => false], label: …)` | off | Lets users treat a file as the complete list: records that are not in it are deleted or changed. See [Records that are not in the file](#records-that-are-not-in-the-file). |
 | `->keepBlankCells()` | off | For existing records, an empty cell leaves the current value instead of clearing it. Users can change it in the column step. See [Updating existing records](#updating-existing-records). |
 | `->updateColumns(['price', 'stock'])` | all columns | The columns that may change on existing records; the others are only used for new records. Users can change it in the column step. |
@@ -539,64 +539,106 @@ Only the rows with a changed value are checked again. **Find and replace** works
 
 ## AI suggestions
 
-Files from other systems rarely use your names: "Client ID" for the customer code, "Mail" for the email, "Membership level" for the rank, and values like "England", "Deutschland" or "VIP". Turn on `aiSuggestions()` and users can ask Claude to map them:
+Enable suggestions when files use different headers or spellings. Users review the proposed mappings before importing:
 
 ```php
 WarpImportAction::make()
     ->importer(CustomerImporter::class)
-    ->aiSuggestions(),
+    ->aiSuggestions()
+    ->aiFeature('customer_import'),
 ```
+
+### Which AI service is used
+
+Import uses the first available implementation:
+
+1. `using`: your class implementing `Ai\SuggestsMappings`.
+2. A gateway bound to `warp.ai`. Warp SaaS provides this gateway and handles providers, models, usage and company limits.
+
+With neither, the AI controls are hidden and direct suggestion calls return 403. A provider key alone does not enable AI. `AnthropicSuggester`, the `aiSuggestions(model:)` argument and the direct `services.anthropic.key` path have been removed. Existing saved imports with an old `model` setting still work; that setting is ignored.
+
+`aiSuggestions(bool|Closure $condition = true, bool $samples = true, ?string $using = null, bool $rewrites = true)` controls visibility, sample sharing, implementation and rewrite suggestions. `samples: false` sends headers only for columns and hides rewrites; value matching still needs the values being matched. Each user may ask 20 times a minute.
+
+`aiFeature(string|Closure|null $name)` sets the gateway's optional `meter`; it works before or after `aiSuggestions()`. Without a name, the gateway uses `import.columns`, `import.values` or `import.rewrites`. Custom `using` classes do not use the gateway or meter.
+
+Once per wizard mount, Import calls the gateway's optional `unavailable(array $request): ?string` with a columns request. A returned sentence disables the suggestion buttons and appears beside them; direct calls return that sentence without asking AI. Gateways without this method remain usable. Exceptions with a nonempty `userMessage()` show that sentence (up to 300 characters); other failures show the translated AI failure message.
+
+**What is sent when a button is pressed:**
+
+| Feature | Instructions (application definitions) | Input (file/user data) |
+| --- | --- | --- |
+| `columns` | Unmapped fields: name, label, type, required flag and first choice labels | Unused headers, indices and up to three sample values per header (`samples: false` omits samples) |
+| `values` | Field label/type and up to 300 accepted values/labels, including related records scoped to the current tenant | Up to 150 distinct values the column does not accept and that have no mapping |
+| `rewrites` | Field name, label/type and rewrite rules | User instruction and up to 20 distinct example values |
+
+All three requests have `v: 1`, `plugin: import`, `tier: fast`, a strict JSON `schema`, the current Filament `tenant` and signed-in `user`, and app `locale`. `max_output_tokens` is 4096 for columns/values and 2048 for rewrites. The gateway returns `['data' => [...]]`. Unknown fields, headers, duplicate header assignments and unsupported values are dropped. These file values leave the server only after the user requests suggestions. Leave AI off for data that must remain on your servers.
+
+**Without Warp SaaS**, bind your own gateway in `AppServiceProvider::register()`:
 
 ```php
-// config/services.php
-'anthropic' => [
-    'key' => env('ANTHROPIC_API_KEY'),
-],
+$this->app->singleton('warp.ai', \App\Ai\AiGateway::class);
 ```
 
-- **Columns**: **Suggest with AI** above the column table sends the fields that are not mapped yet (name, label, type, whether required, the first choices) and the headers that are not used yet with up to three values from each. The answers fill only fields that are still **Do not import**, and are marked **AI** until the user changes them.
-- **Values**: in the value mapping of a column (**Map values…** or **Choose…** next to an error), **Suggest with AI** sends the values the column does not accept as written (up to 150) and the values it accepts (up to 300; for a relationship, the first 300 records by name). The answers fill only values without a mapping, are marked **AI**, and are written only when the user presses **Apply**; the rows are then checked again as usual.
-- Nothing is imported on the AI's word: every suggestion goes through the same review as everything else. Answers that name a field, header or value that does not exist, or a header twice, are dropped.
-- If the key is missing or Claude does not answer, the user sees a short message and carries on by hand. Each user can ask 20 times a minute.
+The gateway owns provider credentials and model selection. For example, this HTTP adapter follows the same structured-output approach as Warp Input (configure the endpoint, headers and model in your application):
 
-| Argument | Default | |
-| --- | --- | --- |
-| `$condition` | `true` | A bool or closure: who sees the button. |
-| `model` | `'claude-haiku-4-5'` | The Claude model. Haiku is fast and costs a fraction of a cent per question; `claude-sonnet-5` thinks harder. |
-| `samples` | `true` | Send the first values of each column with the headers. `false` sends the headers only (value suggestions always send the values they are about). |
-| `using` | `null` | A class implementing `Qalainau\FilamentWarpImport\Ai\SuggestsMappings`, to use another service or your own rules instead of Claude. |
+```php
+namespace App\Ai;
 
-**Privacy**: headers and sample values, and in the value mapping the values of one column, are sent to Anthropic (or to your `using` class) when the user presses the button — never on their own. Turn samples off, or leave the feature off, for data that must not leave your servers.
+use Illuminate\Support\Facades\Http;
+
+class AiGateway
+{
+    public function ask(array $request): array
+    {
+        $response = Http::timeout(90)
+            ->withHeaders(config('my-ai.headers'))
+            ->post(config('my-ai.endpoint'), [
+                'model' => config('my-ai.models.'.$request['tier']),
+                'max_tokens' => $request['max_output_tokens'],
+                'system' => $request['instructions'],
+                'output_config' => ['format' => ['type' => 'json_schema', 'schema' => $request['schema']]],
+                'messages' => [['role' => 'user', 'content' => $request['input']]],
+            ])->throw();
+
+        return ['data' => json_decode($response->json('content.0.text'), true, flags: JSON_THROW_ON_ERROR)];
+    }
+}
+```
+
+This example expects a Messages-compatible API. It does not count or limit usage. Adapt the provider-specific HTTP response in your gateway.
+
+For business-specific matching, implement `SuggestsMappings` and pass it with `using`:
 
 ```php
 use Qalainau\FilamentWarpImport\Ai\SuggestsMappings;
 
-class OpenAiSuggester implements SuggestsMappings
+class CustomerSuggester implements SuggestsMappings
 {
     public function columns(array $fields, array $headers): array
     {
-        // $fields: [['name' => 'code', 'label' => 'Code', 'type' => 'text', 'required' => true], ...]
-        // $headers: [['index' => 0, 'header' => 'Client ID', 'samples' => ['C0003', 'C9101']], ...]
-        return ['code' => 0];   // field name => header index
+        // Return field name => file column index, only for clear matches.
+        return [];
     }
 
     public function values(array $field, array $values, array $options): array
     {
-        // $values: ['England', 'VIP'], $options: [['value' => 'gb', 'label' => 'United Kingdom'], ...]
-        return ['England' => 'gb'];   // file value => accepted value
+        // Return exact file value => accepted option value.
+        return [];
     }
 }
 
-->aiSuggestions(using: OpenAiSuggester::class)
+// ->aiSuggestions(using: CustomerSuggester::class)
 ```
 
-Throw a `RuntimeException` with a message for the user when the service fails.
+Throw a `RuntimeException` with a user-facing message on failure. Returned mappings receive the same validation as gateway results.
 
 ### Changing values in words
 
-With `->aiSuggestions()`, the review's value mapping panel also lets users ask for changes such as adding phone-number hyphens or removing a `JP-` prefix. **The instruction and up to 20 distinct values from this column are sent to the AI provider (Anthropic by default).** The provider returns up to five regular-expression replacement rules, not executable code. The server previews changes across up to 2,000 distinct values, showing up to 20 before/after examples. Users check the preview before choosing **Apply**, or cancel without changing anything. Applied rules remain visible and can be removed; applying or removing them checks the rows again. Templates and scheduled imports keep the rules.
+The value mapping panel can preview changes such as adding phone-number hyphens or removing a `JP-` prefix. AI returns up to five PCRE find/replace rules. Patterns and replacements are limited to 200 characters each. Replacements reject backslashes and allow only `$0`–`$9` and `${0}`–`${9}` backreferences. Invalid patterns are dropped. Patterns have no delimiters and use the Unicode `u` modifier.
 
-Use `->aiSuggestions(rewrites: false)` to keep mapping suggestions without this field. It is also hidden with `samples: false`. Custom suggesters passed with `using:` must implement both `Ai\SuggestsMappings` and `Ai\SuggestsRewrites` to offer this feature:
+The server previews across up to 2,000 distinct values and shows up to 20 changed examples. Each application disables PCRE JIT and limits matching to 100,000 steps and depth to 10,000; the original PCRE settings are restored afterward. A rule that errors or takes more than one second across preview values is excluded from both preview and the saved proposal, with a message naming its number. Its partial changes are discarded. The same execution limits apply during imports and queued work; a value that hits a limit stays unchanged by that rule.
+
+Users review **Apply** before rules are saved; cancel leaves the values unchanged. Rules run before transforms and value mappings, persist in templates and schedules, and can be removed. `rewrites: false` or `samples: false` hides this feature. A custom class must also implement `Ai\SuggestsRewrites`:
 
 ```php
 public function rewrites(array $field, string $instruction, array $values): array
@@ -604,8 +646,6 @@ public function rewrites(array $field, string $instruction, array $values): arra
     return ['rules' => [['find' => '^JP-', 'replace' => '']], 'note' => null];
 }
 ```
-
-Patterns have no delimiters and run with the Unicode (`u`) modifier, in order, before the configured transforms and value mapping. Replacement backreferences are limited to `$0`–`$9` and `${0}`–`${9}`. Requests that cannot be expressed as these rules return an empty `rules` list and an explanatory `note`.
 
 ## Importing and undoing
 

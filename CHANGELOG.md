@@ -5,7 +5,25 @@ All notable changes to `qalainau/filament-warp-import` will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.0] - 2026-11-25
+
+### Removed
+
+- `AnthropicSuggester`, `aiSuggestions(model:)` and direct calls enabled by `services.anthropic.key`.
+
+### Changed
+
+- AI suggestions require a `warp.ai` gateway or an explicit `using` class. A provider key alone no longer shows AI controls; saved model settings are ignored.
+
+### Added
+
+- `GatewaySuggester` for columns, values and rewrites, `aiFeature()` metering names, and gateway `unavailable()` messages on their own line, in small muted text, below the disabled suggestion buttons.
+- PCRE execution limits during preview and import; preview excludes expensive rules and explains which were skipped.
+- Gateway evaluation cases for all three Import AI features.
+
+### Fixed
+
+- Templates with identical update times are ordered by descending ID for consistent selection.
 
 ## [1.4.2] - 2026-11-25
 
