@@ -5,6 +5,13 @@ All notable changes to `qalainau/filament-warp-import` will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-11-27
+
+### Fixed
+
+- Scheduled imports read large CSV, TSV and .xlsx files row by row instead of holding every row in memory. A 950,000-row, 54 MB CSV used to need more than 500 MB on top of the file and failed on servers with `memory_limit` at 512M or lower; it now needs about the size of the file. The rows, headers and errors are the same as before.
+- The plugin's stylesheet no longer hides the Filament sidebar on desktop screens until the page's JavaScript has loaded. Its `[x-cloak]` rule now only applies inside the import wizard.
+
 ## [1.5.0] - 2026-11-25
 
 ### Removed
