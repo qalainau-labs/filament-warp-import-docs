@@ -1,0 +1,38 @@
+{
+    "version": "1.5.2",
+    "scope": "standard",
+    "since": "v1.5.1（891f6741f）",
+    "browser": {
+        "scope": "all",
+        "scripts": 37,
+        "total": 37,
+        "since": null
+    },
+    "tested_on": "2026-11-28",
+    "combinations": 18,
+    "passed": 18,
+    "tests": 810,
+    "php": [
+        "8.3",
+        "8.4",
+        "8.5"
+    ],
+    "laravel": [
+        "12",
+        "13"
+    ],
+    "databases": [
+        "SQLite 3.45.2",
+        "MySQL 8.4.2",
+        "MySQL 8.0.46",
+        "MariaDB 13.0.2",
+        "MariaDB 10.11.6",
+        "PostgreSQL 18.0",
+        "PostgreSQL 14.11"
+    ],
+    "lowest": {
+        "laravel": "12.40.0",
+        "filament": "5.10.0",
+        "livewire": "4.4.7"
+    }
+}

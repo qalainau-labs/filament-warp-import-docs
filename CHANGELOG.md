@@ -5,6 +5,15 @@ All notable changes to `qalainau/filament-warp-import` will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.5.2] - 2026-11-28
+
+### Fixed
+
+- Yes/no columns now read the Korean 네 and 아니오 (only 예 and 아니요 were read before), and sí, sì and não when they are stored with the accent as a separate character, as files saved on a Mac often do. These rows used to stay as they were and became errors.
+- **Under heavy load, a step of the import could stop or show “Something went wrong”** when the server's reply went missing (checking the rows, reading an XLS/ODS file, changing the mapping, replacing values). The current step now stays usable so you can press the button again, and anything that changes data (checking the rows, editing or skipping rows, replacing values, importing, undoing, saving a template or a schedule, approvals) says that the request failed instead of going back or doing nothing without a word; reading templates, progress and value options asks once more. Steps that write (starting, checking, importing, undoing) are never sent twice: an import that did start goes on to its progress screen, and an undo that stopped can be resumed with the same button.
+
 ## [1.5.1] - 2026-11-27
 
 ### Fixed
